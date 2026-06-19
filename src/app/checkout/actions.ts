@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { splitPrice, fulfillPaidOrder } from "@/lib/commerce";
 import { createPaymentUrl, isConfigured } from "@/lib/vnpay";
+import { createPaymentUrl as momoCreate, isConfigured as momoConfigured } from "@/lib/momo";
+import { getSettings, commissionFor } from "@/lib/settings";
 import { makeTxnRef } from "@/lib/utils";
 
 /** Tạo đơn từ giỏ hàng và khởi tạo thanh toán (TT1 -> TT2). */
@@ -36,6 +38,9 @@ export async function createOrderAndPayAction(formData: FormData) {
   const total = Math.max(0, subtotal - discount);
   const txnRef = makeTxnRef();
 
+  // Tỉ lệ hoa hồng theo tier người bán (AD4) — đọc từ cấu hình admin
+  const settings = await getSettings();
+
   // Tạo đơn + item, tính phí platform theo tier người bán (AD4)
   const order = await prisma.order.create({
     data: {
@@ -50,7 +55,10 @@ export async function createOrderAndPayAction(formData: FormData) {
       providerTxnRef: txnRef,
       items: {
         create: valid.map((c) => {
-          const { platformFeeVnd, sellerEarningVnd } = splitPrice(c.priceVnd, c.photo.seller.sellerTier);
+          const { platformFeeVnd, sellerEarningVnd } = splitPrice(
+            c.priceVnd,
+            commissionFor(c.photo.seller.sellerTier, settings),
+          );
           return {
             photoId: c.photoId,
             sellerId: c.photo.sellerId,
@@ -95,6 +103,25 @@ export async function createOrderAndPayAction(formData: FormData) {
     redirect(payUrl);
   }
 
-  // Fallback: cổng giả lập (chưa cấu hình VNPay)
+  // MoMo thật nếu đã cấu hình (gọi API tạo giao dịch)
+  if (provider === "MOMO" && momoConfigured()) {
+    let payUrl: string | null = null;
+    try {
+      payUrl = await momoCreate({
+        amountVnd: total,
+        orderId: txnRef,
+        orderInfo: `Thanh toan Picseo ${order.id.slice(-8)}`,
+      });
+    } catch (e) {
+      console.error("MoMo create error:", e);
+    }
+    if (payUrl) {
+      await prisma.order.update({ where: { id: order.id }, data: { payUrl } });
+      redirect(payUrl); // redirect ngoài try/catch
+    }
+    redirect("/checkout?error=Không tạo được giao dịch MoMo, thử lại hoặc đổi cổng");
+  }
+
+  // Fallback: cổng giả lập (chưa cấu hình cổng thật)
   redirect(`/payment/mock?order=${order.id}`);
 }

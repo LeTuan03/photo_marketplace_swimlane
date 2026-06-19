@@ -46,6 +46,18 @@ export const env = {
     ipnUrl: str("VNPAY_IPN_URL", "http://localhost:3000/api/payment/vnpay/ipn"),
   },
 
+  momo: {
+    partnerCode: str("MOMO_PARTNER_CODE"),
+    accessKey: str("MOMO_ACCESS_KEY"),
+    secretKey: str("MOMO_SECRET_KEY"),
+    endpoint: str("MOMO_ENDPOINT", "https://test-payment.momo.vn/v2/gateway/api/create"),
+  },
+
+  google: {
+    clientId: str("GOOGLE_CLIENT_ID"),
+    clientSecret: str("GOOGLE_CLIENT_SECRET"),
+  },
+
   rules: {
     escrowHoldDays: int("ESCROW_HOLD_DAYS", 7),
     downloadLinkHours: int("DOWNLOAD_LINK_HOURS", 24),

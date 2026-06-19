@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, CheckSquare, Users, AlertTriangle, Wallet } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Users, AlertTriangle, Wallet, Settings, FolderTree, ShieldAlert } from "lucide-react";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -7,10 +7,11 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   await requireRole("ADMIN");
-  const [pending, openDisputes, payouts] = await Promise.all([
+  const [pending, openDisputes, payouts, dmca] = await Promise.all([
     prisma.photo.count({ where: { status: "PENDING" } }),
     prisma.dispute.count({ where: { status: "OPEN" } }),
     prisma.payout.count({ where: { status: "REQUESTED" } }),
+    prisma.dmcaClaim.count({ where: { status: { in: ["OPEN", "COUNTERED"] } } }),
   ]);
 
   const nav = [
@@ -18,7 +19,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     { href: "/admin/review", label: "Duyệt ảnh", icon: CheckSquare, badge: pending },
     { href: "/admin/users", label: "Người dùng", icon: Users, badge: 0 },
     { href: "/admin/disputes", label: "Tranh chấp", icon: AlertTriangle, badge: openDisputes },
+    { href: "/admin/dmca", label: "DMCA", icon: ShieldAlert, badge: dmca },
     { href: "/admin/payouts", label: "Rút tiền", icon: Wallet, badge: payouts },
+    { href: "/admin/categories", label: "Danh mục", icon: FolderTree, badge: 0 },
+    { href: "/admin/settings", label: "Cấu hình", icon: Settings, badge: 0 },
   ];
 
   return (

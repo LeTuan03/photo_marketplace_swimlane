@@ -2,13 +2,16 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { formatVnd } from "@/lib/money";
-import { TIER_LABELS, COMMISSION_RATE } from "@/lib/constants";
+import { TIER_LABELS } from "@/lib/constants";
+import { getSettings, commissionFor } from "@/lib/settings";
 import { PageHeader, StatCard, EscrowStatusBadge } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
 export default async function SellerDashboard() {
   const user = await requireRole("SELLER", "ADMIN");
+  const settings = await getSettings();
+  const commissionPct = Math.round(commissionFor(user.sellerTier, settings) * 100);
 
   const [live, pending, rejected, sales, escrowAgg, recentItems] = await Promise.all([
     prisma.photo.count({ where: { sellerId: user.id, status: "LIVE" } }),
@@ -33,7 +36,7 @@ export default async function SellerDashboard() {
     <div>
       <PageHeader
         title={`Xin chào, ${user.name}`}
-        subtitle={`Tier ${TIER_LABELS[user.sellerTier]} · Hoa hồng nền tảng ${COMMISSION_RATE[user.sellerTier] * 100}%`}
+        subtitle={`Tier ${TIER_LABELS[user.sellerTier]} · Hoa hồng nền tảng ${commissionPct}%`}
         action={<Link href="/seller/upload" className="btn-primary">Đăng ảnh mới</Link>}
       />
 

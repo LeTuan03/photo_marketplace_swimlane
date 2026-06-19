@@ -140,7 +140,7 @@ async function main() {
       kycStatus: "VERIFIED",
     },
   });
-  await prisma.user.upsert({
+  const buyer = await prisma.user.upsert({
     where: { email: "buyer@picseo.local" },
     update: {},
     create: { email: "buyer@picseo.local", name: "Người mua demo", passwordHash: pwd, role: "BUYER" },
@@ -234,6 +234,34 @@ async function main() {
       },
     });
     console.log("  ✔ Đã tạo 1 ảnh PENDING chờ duyệt");
+  }
+
+  // --- Reviews demo (để hiển thị sao) ---
+  const someLive = await prisma.photo.findMany({ where: { status: "LIVE" }, take: 3 });
+  const demoReviews = [
+    { rating: 5, comment: "Ảnh rất đẹp, chất lượng nét căng!" },
+    { rating: 4, comment: "Đáng tiền, sẽ mua thêm." },
+    { rating: 5, comment: "Tuyệt vời, đúng như mô tả." },
+  ];
+  for (let i = 0; i < someLive.length; i++) {
+    const p = someLive[i];
+    if (p.sellerId === buyer.id) continue;
+    const exists = await prisma.review.findUnique({
+      where: { photoId_buyerId: { photoId: p.id, buyerId: buyer.id } },
+    });
+    if (exists) continue;
+    const r = demoReviews[i % demoReviews.length];
+    await prisma.review.create({
+      data: { photoId: p.id, sellerId: p.sellerId, buyerId: buyer.id, rating: r.rating, comment: r.comment },
+    });
+    await prisma.photo.update({
+      where: { id: p.id },
+      data: { ratingSum: { increment: r.rating }, ratingCount: { increment: 1 } },
+    });
+    await prisma.user.update({
+      where: { id: p.sellerId },
+      data: { ratingSum: { increment: r.rating }, ratingCount: { increment: 1 } },
+    });
   }
 
   console.log("✅ Seed hoàn tất.");

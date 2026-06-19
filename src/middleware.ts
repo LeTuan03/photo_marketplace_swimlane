@@ -28,7 +28,8 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/library") ||
     pathname.startsWith("/cart") ||
     pathname.startsWith("/checkout") ||
-    pathname.startsWith("/notifications");
+    pathname.startsWith("/notifications") ||
+    pathname.startsWith("/wishlist");
 
   if (needsAuth && !role) {
     const url = req.nextUrl.clone();
@@ -56,5 +57,6 @@ export const config = {
     "/cart/:path*",
     "/checkout/:path*",
     "/notifications/:path*",
+    "/wishlist/:path*",
   ],
 };

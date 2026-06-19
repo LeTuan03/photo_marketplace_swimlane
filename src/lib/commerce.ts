@@ -1,15 +1,13 @@
 import "server-only";
 import { prisma } from "./prisma";
 import { env } from "./env";
-import { commissionRate } from "./constants";
 import { notify, notifyAdmins } from "./notifications";
 import { randomToken, makeCertNo } from "./utils";
 import { formatVnd } from "./money";
-import type { SellerTier } from "@prisma/client";
 
-/** Tính phí platform & phần người bán nhận được cho một item. */
-export function splitPrice(priceVnd: number, tier: SellerTier) {
-  const fee = Math.round(priceVnd * commissionRate(tier));
+/** Tính phí platform & phần người bán nhận được cho một item theo tỉ lệ hoa hồng (0..1). */
+export function splitPrice(priceVnd: number, rate: number) {
+  const fee = Math.round(priceVnd * rate);
   return { platformFeeVnd: fee, sellerEarningVnd: priceVnd - fee };
 }
 
@@ -149,35 +147,63 @@ export async function releaseDueEscrows(): Promise<number> {
   return count;
 }
 
-/** Hoàn tiền một item (admin xử lý khiếu nại / DMCA) — đóng băng/hoàn escrow. */
-export async function refundOrderItem(orderItemId: string, reason: string): Promise<void> {
+/**
+ * Hoàn tiền một item (TT5). percent = phần trăm hoàn cho người mua (1..100).
+ * - 100%: hoàn toàn bộ, gỡ quyền tải, escrow REFUNDED / hoặc claw back nếu đã giải ngân.
+ * - <100%: hoàn một phần, người mua vẫn giữ file; phần người bán giảm tương ứng.
+ */
+export async function refundOrderItem(orderItemId: string, reason: string, percent = 100): Promise<void> {
+  const pct = Math.min(100, Math.max(1, Math.round(percent)));
+  const full = pct >= 100;
+
   const item = await prisma.orderItem.findUnique({
     where: { id: orderItemId },
     include: { escrow: true, order: true },
   });
   if (!item) throw new Error("ITEM_NOT_FOUND");
 
+  const buyerRefund = Math.round((item.priceVnd * pct) / 100);
+  const sellerKeep = Math.round((item.sellerEarningVnd * (100 - pct)) / 100);
+  const clawback = item.sellerEarningVnd - sellerKeep;
+
   await prisma.$transaction(async (tx) => {
-    if (item.escrow && item.escrow.status === "HELD") {
-      await tx.escrowHold.update({
-        where: { id: item.escrow.id },
-        data: { status: "REFUNDED" },
-      });
+    if (item.escrow) {
+      if (item.escrow.status === "HELD") {
+        if (full) {
+          await tx.escrowHold.update({ where: { id: item.escrow.id }, data: { status: "REFUNDED" } });
+        } else {
+          await tx.escrowHold.update({ where: { id: item.escrow.id }, data: { amountVnd: sellerKeep } });
+        }
+      } else if (item.escrow.status === "RELEASED" && clawback > 0) {
+        // người bán đã nhận tiền -> trừ lại phần hoàn
+        const u = await tx.user.findUnique({ where: { id: item.sellerId } });
+        const deduct = Math.min(u?.balanceVnd ?? 0, clawback);
+        const after = (u?.balanceVnd ?? 0) - deduct;
+        await tx.user.update({ where: { id: item.sellerId }, data: { balanceVnd: after } });
+        await tx.walletTransaction.create({
+          data: {
+            userId: item.sellerId,
+            type: "REFUND_ADJUST",
+            amountVnd: -deduct,
+            balanceAfterVnd: after,
+            ref: item.id,
+            note: `Trừ lại do hoàn ${pct}% cho người mua`,
+          },
+        });
+      }
     }
-    // vô hiệu hóa quyền tải
-    await tx.downloadGrant.updateMany({
-      where: { orderItemId: item.id },
-      data: { maxDownloads: 0 },
-    });
+    if (full) {
+      await tx.downloadGrant.updateMany({ where: { orderItemId: item.id }, data: { maxDownloads: 0 } });
+    }
   });
 
   await notify({
     userId: item.order.buyerId,
     type: "REFUND_DONE",
-    title: "Hoàn tiền đã được thực hiện",
-    body: `Khoản thanh toán cho 1 ảnh đã được hoàn lại. Lý do: ${reason}.`,
+    title: full ? "Hoàn tiền toàn bộ" : "Hoàn tiền một phần",
+    body: `Bạn được hoàn ${formatVnd(buyerRefund)} (${pct}%) cho 1 ảnh. Lý do: ${reason}.`,
     link: "/library",
     email: true,
   });
-  await notifyAdmins("Đã hoàn tiền 1 giao dịch", `Item ${orderItemId} — ${reason}`);
+  await notifyAdmins("Đã hoàn tiền 1 giao dịch", `Item ${orderItemId} — hoàn ${pct}% (${formatVnd(buyerRefund)}) — ${reason}`);
 }

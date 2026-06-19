@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
-import { notifyAdmins } from "@/lib/notifications";
+import { notify, notifyAdmins } from "@/lib/notifications";
+import { DMCA_WINDOW_DAYS } from "@/lib/dmca";
 import type { LicenseType } from "@prisma/client";
 
 export async function addToCartAction(formData: FormData) {
@@ -64,6 +65,44 @@ export async function reportPhotoAction(formData: FormData) {
 
   const reason = String(formData.get("reason") ?? "OTHER");
   const detail = String(formData.get("detail") ?? "").slice(0, 1000);
+
+  // Nhánh DMCA: tạo claim, ẩn ảnh, mở cửa sổ phản biện 7 ngày (AD7/S10b/N8)
+  if (reason === "DMCA") {
+    const photo = await prisma.photo.findUnique({
+      where: { id: photoId },
+      select: { id: true, sellerId: true, title: true, status: true },
+    });
+    if (!photo) redirect("/");
+    if (photo!.sellerId === user!.id) redirect(`/photos/${photoId}?error=Không thể khiếu nại ảnh của chính bạn`);
+    if (photo!.status !== "LIVE" && photo!.status !== "LOCKED") {
+      redirect(`/photos/${photoId}?error=Ảnh không ở trạng thái có thể khiếu nại`);
+    }
+    const dup = await prisma.dmcaClaim.findFirst({
+      where: { photoId, claimantId: user!.id, status: { in: ["OPEN", "COUNTERED"] } },
+    });
+    if (dup) redirect("/?dmca=1");
+
+    const deadline = new Date(Date.now() + DMCA_WINDOW_DAYS * 24 * 3600 * 1000);
+    await prisma.$transaction(async (tx) => {
+      await tx.dmcaClaim.create({ data: { photoId, claimantId: user!.id, evidence: detail, deadline } });
+      await tx.photo.update({ where: { id: photoId }, data: { status: "DMCA_HOLD" } });
+    });
+
+    await notify({
+      userId: photo!.sellerId,
+      type: "DMCA",
+      title: "Ảnh bị khiếu nại bản quyền (DMCA)",
+      body: `"${photo!.title}" đã bị ẩn do có khiếu nại DMCA. Bạn có ${DMCA_WINDOW_DAYS} ngày để gửi phản biện (counter-claim), nếu không ảnh sẽ bị gỡ vĩnh viễn.`,
+      link: "/seller/inventory",
+      email: true,
+    });
+    await notifyAdmins(
+      "Khiếu nại DMCA mới",
+      `Ảnh "${photo!.title}" bị khiếu nại. Hạn phản biện: ${deadline.toLocaleDateString("vi-VN")}.`,
+      "/admin/dmca",
+    );
+    redirect("/?dmca=1");
+  }
 
   await prisma.dispute.create({
     data: { photoId, raisedById: user!.id, reason, detail, status: "OPEN" },

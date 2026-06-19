@@ -3,7 +3,8 @@ import { requireRole } from "@/lib/auth";
 import { uploadPhotoAction } from "../actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import { PageHeader, Alert } from "@/components/ui";
-import { LICENSE_ORDER, LICENSE_LABELS, DEFAULT_LICENSE_PRICE } from "@/lib/constants";
+import { LICENSE_ORDER, LICENSE_LABELS } from "@/lib/constants";
+import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,10 @@ export default async function UploadPage({
 }) {
   await requireRole("SELLER", "ADMIN");
   const sp = await searchParams;
-  const categories = await prisma.category.findMany({ orderBy: { sortOrder: "asc" } });
+  const [categories, settings] = await Promise.all([
+    prisma.category.findMany({ orderBy: { sortOrder: "asc" } }),
+    getSettings(),
+  ]);
 
   return (
     <div>
@@ -24,12 +28,13 @@ export default async function UploadPage({
       <form action={uploadPhotoAction} className="grid gap-6 lg:grid-cols-2">
         <div className="card space-y-4 p-5">
           <div>
-            <label className="label">File ảnh (JPG/PNG/WEBP, tối đa 50MB)</label>
-            <input name="file" type="file" accept="image/jpeg,image/png,image/webp" required className="input" />
+            <label className="label">File ảnh (JPG/PNG/WEBP, tối đa 50MB/ảnh — chọn nhiều để tải hàng loạt, tối đa 10)</label>
+            <input name="file" type="file" accept="image/jpeg,image/png,image/webp" multiple required className="input" />
           </div>
           <div>
-            <label className="label">Tiêu đề *</label>
-            <input name="title" required minLength={3} className="input" placeholder="VD: Hoàng hôn trên biển" />
+            <label className="label">Tiêu đề</label>
+            <input name="title" minLength={3} className="input" placeholder="VD: Hoàng hôn trên biển" />
+            <p className="mt-1 text-xs text-gray-400">Tải nhiều ảnh: để trống sẽ dùng tên file; hoặc nhập tiền tố chung (sẽ thêm số thứ tự).</p>
           </div>
           <div>
             <label className="label">Mô tả</label>
@@ -74,7 +79,7 @@ export default async function UploadPage({
                 type="number"
                 min={0}
                 step={1000}
-                defaultValue={DEFAULT_LICENSE_PRICE[type]}
+                defaultValue={settings.licenseDefaults[type]}
                 className="input max-w-[140px] text-right"
               />
             </div>

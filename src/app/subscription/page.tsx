@@ -1,8 +1,9 @@
 import { Check } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { formatVnd } from "@/lib/money";
-import { PLAN_LABELS, PLAN_PRICE, PLAN_QUOTA, PLAN_DESCRIPTIONS } from "@/lib/constants";
+import { PLAN_LABELS, PLAN_DESCRIPTIONS } from "@/lib/constants";
 import { ensureFreshQuota, getQuotaState } from "@/lib/subscription";
+import { getSettings, planPriceFor, planQuotaFor } from "@/lib/settings";
 import { subscribeAction, cancelSubscriptionAction } from "./actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import { PageHeader, StatCard, Alert } from "@/components/ui";
@@ -20,7 +21,8 @@ export default async function SubscriptionPage({
   const sp = await searchParams;
   let user = await requireUser();
   user = await ensureFreshQuota(user);
-  const state = getQuotaState(user);
+  const settings = await getSettings();
+  const state = getQuotaState(user, planQuotaFor(user.planType, settings));
 
   return (
     <div>
@@ -47,7 +49,8 @@ export default async function SubscriptionPage({
       <div className="grid gap-4 md:grid-cols-3">
         {PLANS.map((plan) => {
           const current = state.plan === plan && (plan === "FREE" || state.isActive);
-          const quota = PLAN_QUOTA[plan];
+          const quota = planQuotaFor(plan, settings);
+          const planPrice = planPriceFor(plan, settings);
           return (
             <div key={plan} className={`card flex flex-col p-5 ${current ? "ring-2 ring-brand-500" : ""}`}>
               <div className="flex items-center justify-between">
@@ -55,7 +58,7 @@ export default async function SubscriptionPage({
                 {current && <span className="badge bg-brand-100 text-brand-700">Đang dùng</span>}
               </div>
               <p className="mt-1 text-2xl font-bold text-brand-700">
-                {plan === "FREE" ? "Miễn phí" : formatVnd(PLAN_PRICE[plan])}
+                {plan === "FREE" ? "Miễn phí" : formatVnd(planPrice)}
                 {plan !== "FREE" && <span className="text-sm font-normal text-gray-400">/tháng</span>}
               </p>
               <p className="mt-2 text-sm text-gray-600">{PLAN_DESCRIPTIONS[plan]}</p>

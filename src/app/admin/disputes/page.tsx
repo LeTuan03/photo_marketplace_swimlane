@@ -62,13 +62,15 @@ export default async function DisputesPage() {
 
                 {open && (
                   <div className="mt-3 flex gap-2">
-                    <form action={resolveDisputeAction}>
+                    <form action={resolveDisputeAction} className="flex items-center gap-2">
                       <input type="hidden" name="disputeId" value={d.id} />
                       <input type="hidden" name="orderItemId" value={orderItemId} />
                       <input type="hidden" name="decision" value="refund" />
-                      <SubmitButton className="btn-danger">
-                        {d.reason === "DMCA" ? "Gỡ ảnh + hoàn tiền" : "Hoàn tiền người mua"}
-                      </SubmitButton>
+                      <div className="flex items-center gap-1">
+                        <input name="percent" type="number" min={1} max={100} defaultValue={100} className="input w-20 text-right" title="% hoàn" />
+                        <span className="text-xs text-gray-500">%</span>
+                      </div>
+                      <SubmitButton className="btn-danger">Hoàn tiền người mua</SubmitButton>
                     </form>
                     <form action={resolveDisputeAction}>
                       <input type="hidden" name="disputeId" value={d.id} />

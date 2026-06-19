@@ -4,12 +4,14 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { publicAssetUrl } from "@/lib/storage";
 import { formatVnd } from "@/lib/money";
-import { LICENSE_LABELS, LICENSE_ORDER, DEFAULT_LICENSE_PRICE } from "@/lib/constants";
+import { LICENSE_LABELS, LICENSE_ORDER } from "@/lib/constants";
+import { getSettings } from "@/lib/settings";
 import {
   togglePhotoVisibilityAction,
   deletePhotoAction,
   updatePhotoAction,
   resubmitPhotoAction,
+  submitCounterClaimAction,
 } from "../actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import { PageHeader, EmptyState, PhotoStatusBadge, Alert } from "@/components/ui";
@@ -19,15 +21,24 @@ export const dynamic = "force-dynamic";
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ uploaded?: string; updated?: string; resubmitted?: string }>;
+  searchParams: Promise<{ uploaded?: string; skipped?: string; updated?: string; resubmitted?: string; countered?: string; error?: string }>;
 }) {
   const user = await requireRole("SELLER", "ADMIN");
   const sp = await searchParams;
+  const settings = await getSettings();
 
   const photos = await prisma.photo.findMany({
     where: { sellerId: user.id, status: { not: "REMOVED" } },
     orderBy: { createdAt: "desc" },
-    include: { licenses: true, _count: { select: { orderItems: true } } },
+    include: {
+      licenses: true,
+      _count: { select: { orderItems: true } },
+      dmcaClaims: {
+        where: { status: { in: ["OPEN", "COUNTERED"] } },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
+    },
   });
 
   return (
@@ -38,9 +49,18 @@ export default async function InventoryPage({
         action={<Link href="/seller/upload" className="btn-primary">Đăng ảnh mới</Link>}
       />
 
-      {sp.uploaded && <div className="mb-4"><Alert kind="success">Đã tải lên! Ảnh đang chờ duyệt.</Alert></div>}
+      {sp.uploaded && (
+        <div className="mb-4">
+          <Alert kind="success">
+            Đã tải lên {sp.uploaded} ảnh, đang chờ duyệt.
+            {sp.skipped && ` (${sp.skipped} ảnh bị bỏ qua do sai định dạng/lỗi)`}
+          </Alert>
+        </div>
+      )}
       {sp.updated && <div className="mb-4"><Alert kind="success">Đã cập nhật ảnh.</Alert></div>}
       {sp.resubmitted && <div className="mb-4"><Alert kind="success">Đã gửi lại để duyệt.</Alert></div>}
+      {sp.countered && <div className="mb-4"><Alert kind="success">Đã gửi phản biện DMCA. Chờ quản trị viên xét.</Alert></div>}
+      {sp.error && <div className="mb-4"><Alert kind="error">{decodeURIComponent(sp.error)}</Alert></div>}
 
       {photos.length === 0 ? (
         <EmptyState title="Kho ảnh trống" action={<Link href="/seller/upload" className="btn-primary mt-2">Đăng ảnh đầu tiên</Link>} />
@@ -91,6 +111,28 @@ export default async function InventoryPage({
                   </div>
                 </div>
 
+                {/* DMCA — phản biện (S10b) */}
+                {p.status === "DMCA_HOLD" && p.dmcaClaims[0] && (
+                  <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
+                    <p className="font-medium text-red-800">Ảnh bị khiếu nại bản quyền (DMCA)</p>
+                    {p.dmcaClaims[0].evidence && (
+                      <p className="mt-1 text-red-700">Nội dung khiếu nại: {p.dmcaClaims[0].evidence}</p>
+                    )}
+                    <p className="mt-1 text-xs text-red-600">
+                      Hạn phản biện: {new Date(p.dmcaClaims[0].deadline).toLocaleString("vi-VN")} — quá hạn không phản biện ảnh sẽ bị gỡ.
+                    </p>
+                    {p.dmcaClaims[0].status === "OPEN" ? (
+                      <form action={submitCounterClaimAction} className="mt-2 space-y-2">
+                        <input type="hidden" name="claimId" value={p.dmcaClaims[0].id} />
+                        <textarea name="statement" rows={2} required className="input" placeholder="Trình bày phản biện và bằng chứng sở hữu của bạn..." />
+                        <SubmitButton className="btn-danger">Gửi phản biện (counter-claim)</SubmitButton>
+                      </form>
+                    ) : (
+                      <p className="mt-2 text-xs font-medium text-amber-700">Đã gửi phản biện · chờ quản trị viên xét.</p>
+                    )}
+                  </div>
+                )}
+
                 {/* Sửa nhanh giá/tag/mô tả (S6) */}
                 <details className="mt-3 border-t border-gray-100 pt-3">
                   <summary className="flex cursor-pointer items-center gap-1.5 text-sm font-medium text-gray-600">
@@ -120,7 +162,7 @@ export default async function InventoryPage({
                               type="number"
                               min={0}
                               step={1000}
-                              defaultValue={cur?.priceVnd ?? DEFAULT_LICENSE_PRICE[type]}
+                              defaultValue={cur?.priceVnd ?? settings.licenseDefaults[type]}
                               className="input max-w-[110px] text-right"
                             />
                           </div>

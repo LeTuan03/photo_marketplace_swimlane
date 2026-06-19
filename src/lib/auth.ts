@@ -16,21 +16,31 @@ export type SessionPayload = {
   role: Role;
 };
 
-export async function createSession(payload: SessionPayload): Promise<void> {
-  const token = await new SignJWT({ ...payload })
+async function signToken(payload: SessionPayload): Promise<string> {
+  return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${MAX_AGE}s`)
     .sign(secret);
+}
 
+const COOKIE_OPTS = {
+  httpOnly: true,
+  secure: env.isProd,
+  sameSite: "lax" as const,
+  path: "/",
+  maxAge: MAX_AGE,
+};
+
+export async function createSession(payload: SessionPayload): Promise<void> {
+  const token = await signToken(payload);
   const store = await cookies();
-  store.set(COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: env.isProd,
-    sameSite: "lax",
-    path: "/",
-    maxAge: MAX_AGE,
-  });
+  store.set(COOKIE_NAME, token, COOKIE_OPTS);
+}
+
+/** Dùng trong Route Handler khi cần set cookie phiên trực tiếp lên NextResponse. */
+export async function buildSessionCookie(payload: SessionPayload) {
+  return { name: COOKIE_NAME, value: await signToken(payload), options: COOKIE_OPTS };
 }
 
 export async function destroySession(): Promise<void> {

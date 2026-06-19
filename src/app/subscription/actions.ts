@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
-import { PLAN_PRICE } from "@/lib/constants";
+import { getSettings, planPriceFor, planQuotaFor } from "@/lib/settings";
 import { createPaymentUrl, isConfigured } from "@/lib/vnpay";
 import { makeTxnRef, randomToken, makeCertNo } from "@/lib/utils";
 import { signDownloadToken } from "@/lib/download";
@@ -32,7 +32,8 @@ export async function subscribeAction(formData: FormData) {
     redirect("/subscription?downgraded=1");
   }
 
-  const price = PLAN_PRICE[plan];
+  const settings = await getSettings();
+  const price = planPriceFor(plan, settings);
   const txnRef = makeTxnRef();
   const sub = await prisma.subscription.create({
     data: { userId: user.id, plan, status: "PENDING", priceVnd: price, providerTxnRef: txnRef },
@@ -70,7 +71,9 @@ export async function subscriptionDownloadAction(formData: FormData) {
   const sizeLabel = String(formData.get("sizeLabel") ?? "ORIGINAL");
 
   user = await ensureFreshQuota(user);
-  if (!canDownloadViaPlan(user)) {
+  const settings = await getSettings();
+  const limit = planQuotaFor(user.planType, settings);
+  if (!canDownloadViaPlan(user, limit)) {
     redirect(`/photos/${photoId}?error=Gói của bạn không còn quota hoặc đã hết hạn`);
   }
 
@@ -106,7 +109,7 @@ export async function subscriptionDownloadAction(formData: FormData) {
     // N11: cảnh báo khi quota gần hết (gói có giới hạn)
     const after = await prisma.user.findUnique({ where: { id: user.id } });
     if (after) {
-      const s = getQuotaState(after);
+      const s = getQuotaState(after, limit);
       if (s.limit > 0 && s.remaining <= 2) {
         await notify({
           userId: user.id,

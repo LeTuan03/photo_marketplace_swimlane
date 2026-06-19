@@ -38,7 +38,15 @@ enum PhotoStatus {
   REJECTED // bị từ chối (S5b)
   HIDDEN // người bán ẩn tạm (S7)
   LOCKED // đang trong giao dịch swap (SW3)
+  DMCA_HOLD // bị khiếu nại DMCA, ẩn chờ phán quyết (AD7/S10b)
   REMOVED // gỡ bỏ (DMCA / xoá)
+}
+
+enum DmcaStatus {
+  OPEN // claim mới, ảnh bị ẩn, chờ phản biện 7 ngày
+  COUNTERED // người bán đã phản biện, chờ admin xét
+  RESOLVED_REMOVED // admin/expiry: gỡ ảnh vĩnh viễn
+  RESOLVED_RESTORED // admin bác khiếu nại: khôi phục ảnh
 }
 
 enum LicenseType {
@@ -88,6 +96,8 @@ enum NotificationType {
   PAYOUT_RELEASED // N10
   QUOTA_LOW // N11
   SUB_ACTIVATED
+  PRICE_DROP // B12: ảnh trong wishlist giảm giá
+  DMCA // N8: thông báo khiếu nại DMCA
   ADMIN_ALERT // N12
   GENERIC
 }
@@ -132,7 +142,9 @@ enum WalletTxType {
 model User {
   id           String     @id @default(cuid())
   email        String     @unique
-  passwordHash String
+  passwordHash String? // null nếu chỉ đăng nhập bằng OAuth
+  googleId     String?    @unique
+  image        String? // avatar (OAuth)
   name         String
   role         Role       @default(BUYER)
   sellerTier   SellerTier @default(NEW)
@@ -140,6 +152,11 @@ model User {
 
   // Ví người bán (VND)
   balanceVnd Int @default(0) // số dư có thể rút (đã giải ngân khỏi escrow)
+
+  // Uy tín người bán
+  ratingSum     Int @default(0) // tổng điểm sao nhận được
+  ratingCount   Int @default(0) // số lượt đánh giá
+  penaltyPoints Int @default(0) // điểm phạt (B9: hoàn tiền do lỗi người bán)
 
   // Thông tin nhận tiền
   payoutMethod  String? // BANK | PAYPAL
@@ -165,9 +182,13 @@ model User {
   walletTxns    WalletTransaction[]
   escrowHolds   EscrowHold[]        @relation("SellerEscrow")
   downloads     DownloadGrant[]
-  swapsSent     SwapOffer[]         @relation("SwapInitiator")
-  swapsReceived SwapOffer[]         @relation("SwapResponder")
-  subscriptions Subscription[]
+  swapsSent       SwapOffer[]    @relation("SwapInitiator")
+  swapsReceived   SwapOffer[]    @relation("SwapResponder")
+  subscriptions   Subscription[]
+  reviewsWritten  Review[]       @relation("BuyerReviews")
+  reviewsReceived Review[]       @relation("SellerReviews")
+  wishlist        WishlistItem[]
+  dmcaClaims      DmcaClaim[]    @relation("DmcaClaimant")
 
   @@index([role])
 }
@@ -209,8 +230,10 @@ model Photo {
   reviewedAt      DateTime?
   reviewedBy      String?
 
-  viewCount  Int @default(0)
-  salesCount Int @default(0)
+  viewCount   Int @default(0)
+  salesCount  Int @default(0)
+  ratingSum   Int @default(0)
+  ratingCount Int @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -222,6 +245,9 @@ model Photo {
   disputes       Dispute[]
   offeredSwaps   SwapOffer[]     @relation("OfferedInSwap")
   requestedSwaps SwapOffer[]     @relation("RequestedInSwap")
+  reviews        Review[]
+  wishlistItems  WishlistItem[]
+  dmcaClaims     DmcaClaim[]
 
   @@index([status])
   @@index([sellerId])
@@ -462,6 +488,55 @@ model Subscription {
 
   @@index([userId])
   @@index([status])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  photo     Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  photoId   String
+  seller    User     @relation("SellerReviews", fields: [sellerId], references: [id])
+  sellerId  String
+  buyer     User     @relation("BuyerReviews", fields: [buyerId], references: [id])
+  buyerId   String
+  rating    Int // 1..5
+  comment   String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([photoId, buyerId]) // mỗi người mua đánh giá 1 lần / ảnh
+  @@index([sellerId])
+}
+
+model DmcaClaim {
+  id               String     @id @default(cuid())
+  photo            Photo      @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  photoId          String
+  claimant         User       @relation("DmcaClaimant", fields: [claimantId], references: [id])
+  claimantId       String
+  evidence         String     @default("") // mô tả/bằng chứng sở hữu
+  status           DmcaStatus @default(OPEN)
+  counterStatement String? // phản biện của người bán
+  deadline         DateTime // hạn 7 ngày để phản biện
+  counteredAt      DateTime?
+  resolvedAt       DateTime?
+  resolution       String?
+  createdAt        DateTime   @default(now())
+
+  @@index([status])
+  @@index([photoId])
+}
+
+model WishlistItem {
+  id         String   @id @default(cuid())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  photo      Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  photoId    String
+  priceAtAdd Int      @default(0) // giá thấp nhất khi thêm — dùng để phát hiện giảm giá
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, photoId])
+  @@index([photoId])
 }
 
 model PlatformSetting {

@@ -8,6 +8,7 @@ import { expireStaleSwaps } from "@/lib/swap";
 import { respondSwapAction, confirmSwapAction, cancelSwapAction } from "./actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import { PageHeader, EmptyState, SwapStatusBadge, Alert } from "@/components/ui";
+import { Stars } from "@/components/Stars";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +18,8 @@ async function loadOffers(userId: string) {
   const include = {
     offeredPhoto: { select: { id: true, title: true, thumbKey: true } },
     requestedPhoto: { select: { id: true, title: true, thumbKey: true } },
-    initiator: { select: { name: true } },
-    responder: { select: { name: true } },
+    initiator: { select: { name: true, ratingSum: true, ratingCount: true } },
+    responder: { select: { name: true, ratingSum: true, ratingCount: true } },
   };
   const [received, sent] = await Promise.all([
     prisma.swapOffer.findMany({ where: { responderId: userId }, orderBy: { createdAt: "desc" }, include }),
@@ -44,14 +45,20 @@ function PhotoMini({ label, photo }: { label: string; photo: { id: string; title
 
 function OfferCard({ offer, role }: { offer: OfferWithPhotos; role: "received" | "sent" }) {
   const confirmed = role === "received" ? offer.responderConfirmed : offer.initiatorConfirmed;
-  const otherName = role === "received" ? offer.initiator.name : offer.responder.name;
+  const other = role === "received" ? offer.initiator : offer.responder;
+  const otherAvg = other.ratingCount > 0 ? other.ratingSum / other.ratingCount : 0;
 
   return (
     <div className="card p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm text-gray-500">
           <SwapStatusBadge status={offer.status} />
-          <span>· với {otherName}</span>
+          <span>· với {other.name}</span>
+          {other.ratingCount > 0 && (
+            <span className="inline-flex items-center gap-1">
+              <Stars value={otherAvg} size={12} /> <span className="text-xs">{otherAvg.toFixed(1)}</span>
+            </span>
+          )}
         </div>
         {offer.suggestedTopUpVnd > 0 && (
           <span className="badge bg-amber-100 text-amber-800">Gợi ý bù {formatVnd(offer.suggestedTopUpVnd)}</span>

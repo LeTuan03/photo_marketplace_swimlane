@@ -1,14 +1,15 @@
 import Link from "next/link";
 import { Search } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/auth";
 import { PhotoCard } from "@/components/PhotoCard";
-import { EmptyState } from "@/components/ui";
+import { EmptyState, Alert } from "@/components/ui";
 import { LICENSE_LABELS, LICENSE_ORDER } from "@/lib/constants";
 import type { Prisma, LicenseType } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
-type SP = { q?: string; cat?: string; license?: string; sort?: string };
+type SP = { q?: string; cat?: string; license?: string; sort?: string; dmca?: string };
 
 export default async function HomePage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -31,7 +32,8 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   const orderBy: Prisma.PhotoOrderByWithRelationInput =
     sort === "popular" ? { salesCount: "desc" } : { createdAt: "desc" };
 
-  const [photos, categories] = await Promise.all([
+  const viewer = await getCurrentUser();
+  const [photos, categories, wish] = await Promise.all([
     prisma.photo.findMany({
       where,
       orderBy,
@@ -43,9 +45,13 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       },
     }),
     prisma.category.findMany({ orderBy: { sortOrder: "asc" } }),
+    viewer
+      ? prisma.wishlistItem.findMany({ where: { userId: viewer.id }, select: { photoId: true } })
+      : Promise.resolve([]),
   ]);
+  const wishSet = new Set(wish.map((w) => w.photoId));
 
-  // sắp theo giá nếu cần (giá nhỏ nhất của ảnh)
+  // sắp theo giá / đánh giá nếu cần
   let list = photos;
   if (sort === "price_asc" || sort === "price_desc") {
     list = [...photos].sort((a, b) => {
@@ -53,10 +59,19 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       const pb = b.licenses.length ? Math.min(...b.licenses.map((l) => l.priceVnd)) : 0;
       return sort === "price_asc" ? pa - pb : pb - pa;
     });
+  } else if (sort === "rating") {
+    const avg = (p: { ratingSum: number; ratingCount: number }) =>
+      p.ratingCount > 0 ? p.ratingSum / p.ratingCount : 0;
+    list = [...photos].sort((a, b) => avg(b) - avg(a));
   }
 
   return (
     <div>
+      {sp.dmca && (
+        <div className="mb-4">
+          <Alert kind="success">Đã gửi khiếu nại DMCA. Ảnh đã được tạm ẩn; quản trị viên sẽ xem xét.</Alert>
+        </div>
+      )}
       <section className="mb-6 rounded-2xl bg-gradient-to-br from-brand-700 to-brand-900 p-8 text-white">
         <h1 className="text-3xl font-bold">Kho ảnh bản quyền cho mọi dự án</h1>
         <p className="mt-2 max-w-xl text-brand-100">
@@ -100,6 +115,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
         <select name="sort" defaultValue={sort} className="input max-w-[160px]">
           <option value="newest">Mới nhất</option>
           <option value="popular">Bán chạy</option>
+          <option value="rating">Đánh giá cao</option>
           <option value="price_asc">Giá tăng dần</option>
           <option value="price_desc">Giá giảm dần</option>
         </select>
@@ -118,7 +134,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {list.map((p) => (
-            <PhotoCard key={p.id} photo={p} />
+            <PhotoCard key={p.id} photo={p} showWishlist={!!viewer} wishlisted={wishSet.has(p.id)} next="/" />
           ))}
         </div>
       )}

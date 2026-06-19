@@ -15,10 +15,11 @@ Bám theo 6 lane trong sơ đồ:
 
 | Lane | Đã có trong MVP |
 |------|-----------------|
-| **Admin** | Cấu hình danh mục (seed), hoa hồng theo tier, **duyệt/từ chối ảnh** (AD6), xử lý **tranh chấp/DMCA** (AD7/AD8), **quản lý người dùng + KYC + tier + khóa** (AD9), **báo cáo/BI** (AD10), duyệt payout |
-| **Người bán** | Đăng ký bán (S1), **upload + watermark + metadata** (S2–S4), trạng thái duyệt (S5/S5b), **sửa/ẩn/xóa** (S6/S7), **xem thu nhập + escrow + rút tiền** (S8/S9) |
-| **Người mua** | Đăng ký/đăng nhập (B1), **tìm kiếm + lọc** (B2), **chi tiết + preview watermark** (B3), **chọn license & size** (B4), **giỏ hàng + coupon** (B5), **tải file gốc** (B6), **thư viện + certificate + tải lại ≤3 lần** (B11), **báo cáo sự cố/DMCA** (B9/B10) |
-| **Thanh toán & Escrow** | Tính tiền (TT1), **cổng VNPay** (TT2) + cổng giả lập, **escrow giữ 7 ngày** (TT3), **giải ngân** qua cron (TT4), **hoàn tiền** khi có khiếu nại (TT5), **rút tiền** (TT6) |
+| **Admin** | **Cấu hình động**: danh mục (AD1), giá license mặc định (AD2), gói/quota (AD3), % hoa hồng theo tier (AD4) qua `/admin/settings` & `/admin/categories`; **duyệt/từ chối ảnh** (AD6), **tranh chấp** (AD8) & **DMCA có counter-claim 7 ngày** (AD7) tại `/admin/dmca`, **người dùng + KYC + tier + khóa** (AD9), **báo cáo/BI** (AD10), duyệt payout |
+| **Người bán** | Đăng ký bán (S1), **upload (đơn + hàng loạt) + watermark + metadata** (S2–S4), trạng thái duyệt (S5/S5b), **sửa/ẩn/xóa** (S6/S7), **xem thu nhập + escrow + rút tiền** (S8/S9) |
+| **Người mua** | Đăng ký/đăng nhập **email + Google OAuth** (B1), **tìm kiếm + lọc + sắp theo đánh giá** (B2), **chi tiết + preview watermark** (B3), **chọn license & size** (B4), **giỏ hàng + coupon** (B5), **tải file gốc** (B6), **thư viện + certificate + tải lại ≤3 lần** (B11), **báo cáo sự cố/DMCA** (B9/B10), **đánh giá ảnh đã mua (rating/review)**, **wishlist + alert giảm giá** (B12) |
+| **Uy tín & đánh giá** | Người mua chấm 1–5★ + bình luận ảnh đã sở hữu; tổng hợp **rating cho ảnh & người bán** (hiện ở thẻ ảnh, trang chi tiết, thẻ swap — SW2); **B9**: admin hoàn tiền do lỗi → **trừ điểm uy tín người bán** (penaltyPoints) |
+| **Thanh toán & Escrow** | Tính tiền (TT1), **cổng VNPay + MoMo** (TT2) + cổng giả lập, **escrow giữ 7 ngày** (TT3), **giải ngân** qua cron (TT4), **hoàn tiền toàn bộ/một phần** khi có khiếu nại (TT5), **rút tiền** (TT6) |
 | **Thông báo** | Trung tâm thông báo + email cho: duyệt/từ chối ảnh (N1/N2), có người mua (N3), mua thành công (N4), swap (N5/N6/N7), hoàn tiền (N9), giải ngân (N10), quota gần hết (N11), alert admin (N12) |
 | **Trao đổi (Swap)** | **Đầy đủ SW1–SW7**: gửi đề nghị (SW1), nhận + xem (SW2), chấp nhận/từ chối 48h (SW3/SW3b), khóa 2 ảnh (SW3), ký xác nhận cuối 2 bên (SW4), hoàn tất + cấp quyền chéo + certificate (SW5), huỷ giữa chừng mở khóa (SW6), gợi ý bù tiền khi lệch giá >30% (SW7) |
 | **Subscription & quota** | **Đầy đủ**: gói Free/Pro (10 ảnh/tháng)/Unlimited (AD3), đăng ký + thanh toán (B7), tải bằng quota (“Còn quota?” → tải miễn phí), reset theo kỳ, cảnh báo quota gần hết (N11), hết hạn → hạ Free (TT7) |
@@ -47,8 +48,12 @@ docker compose up -d
 
 # 4. Tạo bảng trong DB (gồm cả Swap & Subscription)
 npx prisma migrate dev --name init
-# Nếu đã migrate trước đó và vừa cập nhật schema (swap/subscription):
+# Nếu đã migrate trước đó và vừa cập nhật schema:
 #   npx prisma migrate dev --name swap_subscription
+#   npx prisma migrate dev --name reviews_ratings
+#   npx prisma migrate dev --name wishlist
+#   npx prisma migrate dev --name dmca_claims
+#   npx prisma migrate dev --name google_oauth
 
 # 5. Nạp dữ liệu mẫu (tài khoản demo + ảnh + coupon)
 npm run db:seed
@@ -78,6 +83,8 @@ npm run dev
 | | `S3_*` | Endpoint/bucket/key khi `STORAGE_DRIVER=s3` |
 | Email | `SMTP_*` | Để trống → email in ra console (dev) |
 | VNPay | `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET` | Lấy ở sandbox VNPay; để trống → dùng **cổng giả lập** |
+| MoMo | `MOMO_PARTNER_CODE`, `MOMO_ACCESS_KEY`, `MOMO_SECRET_KEY` | Sandbox MoMo; để trống → cổng giả lập |
+| Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth Client (Web); redirect URI = `<APP_URL>/api/auth/google/callback`; để trống → ẩn nút Google |
 | Nghiệp vụ | `ESCROW_HOLD_DAYS`, `DOWNLOAD_LINK_HOURS`, `MAX_DOWNLOADS`, `MIN_PAYOUT_VND` | Quy tắc theo sơ đồ |
 
 ### Dùng MinIO (S3) thay vì lưu cục bộ
@@ -107,6 +114,13 @@ Cơ chế ký theo chuẩn VNPay 2.1.0 (sort param → encode → HMAC-SHA512) t
 IPN là nguồn xác nhận đáng tin cậy; callback dùng để hiển thị kết quả cho người dùng. Hàm
 `fulfillPaidOrder` **idempotent** nên gọi từ cả hai đều an toàn.
 
+### MoMo (sandbox)
+Điền `MOMO_PARTNER_CODE`, `MOMO_ACCESS_KEY`, `MOMO_SECRET_KEY` (sandbox tại
+https://developers.momo.vn) — `redirectUrl`/`ipnUrl` được suy ra từ `APP_URL`
+(`/api/payment/momo/callback`, `/api/payment/momo/ipn`). Ký HMAC-SHA256 theo chuẩn MoMo v2
+trong [src/lib/momo.ts](src/lib/momo.ts). Chưa cấu hình → tự dùng cổng giả lập.
+Người mua chọn cổng (VNPay/MoMo) ở bước thanh toán.
+
 ---
 
 ## 6. Tác vụ định kỳ (cron)
@@ -117,7 +131,7 @@ Hai endpoint cron (bảo vệ bằng `CRON_SECRET`):
 # Chỉ giải ngân escrow đến hạn (TT4)
 curl "http://localhost:3000/api/cron/escrow-release?secret=<CRON_SECRET>"
 
-# Bảo trì tổng hợp: giải ngân escrow + hết hạn swap 48h (SW3b) + hết hạn subscription -> hạ Free (TT7)
+# Bảo trì tổng hợp: escrow (TT4) + hết hạn swap 48h (SW3b) + hết hạn subscription (TT7) + DMCA quá 7 ngày (S10b)
 curl "http://localhost:3000/api/cron/maintenance?secret=<CRON_SECRET>"
 ```
 
@@ -134,7 +148,8 @@ Các phần trong sơ đồ chưa làm (đã chuẩn bị schema/enum để mở
   Cần tích hợp token thẻ / recurring của cổng thanh toán.
 - **AI tagging / AI search** thực thụ (hiện dùng tag thủ công + tìm kiếm full-text).
 - **Bù tiền mặt khi swap lệch giá (SW7)**: hiện chỉ *gợi ý* mức bù; chưa thu tiền top-up qua escrow.
-- **KYC tự động**, **counter-claim DMCA 7 ngày**, **wishlist + alert giá** (B12), **bồi thường credit khi huỷ swap (SW6)**.
+- **KYC tự động** (upload giấy tờ), **bồi thường credit khi huỷ swap (SW6)**.
+- **Cổng Stripe/PayPal quốc tế**, **AI auto-tag**, **lọc theo màu/orientation**, **KYC upload giấy tờ**.
 
 ---
 

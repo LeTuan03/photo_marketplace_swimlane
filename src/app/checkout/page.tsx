@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { formatVnd } from "@/lib/money";
 import { LICENSE_LABELS } from "@/lib/constants";
 import { isConfigured } from "@/lib/vnpay";
+import { isConfigured as momoConfigured } from "@/lib/momo";
 import { createOrderAndPayAction } from "./actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import { PageHeader, EmptyState, Alert } from "@/components/ui";
@@ -19,6 +20,7 @@ export default async function CheckoutPage() {
   const valid = items.filter((i) => i.photo.status === "LIVE" && i.photo.sellerId !== user.id);
   const subtotal = valid.reduce((s, i) => s + i.priceVnd, 0);
   const vnpayReady = isConfigured();
+  const momoReady = momoConfigured();
 
   if (valid.length === 0) {
     return (
@@ -58,7 +60,8 @@ export default async function CheckoutPage() {
           <div>
             <label className="label">Phương thức thanh toán</label>
             <select name="provider" className="input" defaultValue="VNPAY">
-              <option value="VNPAY">VNPay {vnpayReady ? "" : "(sandbox)"}</option>
+              <option value="VNPAY">VNPay{vnpayReady ? "" : " (giả lập)"}</option>
+              <option value="MOMO">MoMo{momoReady ? "" : " (giả lập)"}</option>
             </select>
           </div>
 
@@ -72,10 +75,10 @@ export default async function CheckoutPage() {
           </div>
           <p className="text-xs text-gray-400">Giảm giá (nếu có) được áp dụng sau khi nhập mã ở bước thanh toán.</p>
 
-          {!vnpayReady && (
+          {(!vnpayReady || !momoReady) && (
             <Alert kind="info">
-              Chưa cấu hình VNPay (VNPAY_TMN_CODE/HASH_SECRET). Hệ thống sẽ dùng <strong>cổng thanh toán giả lập</strong> để
-              bạn chạy thử toàn bộ luồng. Điền khóa sandbox trong <code>.env</code> để dùng VNPay thật.
+              Cổng chưa cấu hình khóa sandbox (đánh dấu &quot;giả lập&quot;) sẽ dùng <strong>cổng thanh toán giả lập</strong> để
+              chạy thử toàn bộ luồng escrow. Điền khóa trong <code>.env</code> để dùng VNPay/MoMo thật.
             </Alert>
           )}
 

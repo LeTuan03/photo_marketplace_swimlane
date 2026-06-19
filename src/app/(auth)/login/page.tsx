@@ -2,6 +2,8 @@ import Link from "next/link";
 import { loginAction } from "../actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Alert } from "@/components/ui";
+import { GoogleButton, OrDivider } from "@/components/GoogleButton";
+import { googleConfigured } from "@/lib/google";
 
 export default async function LoginPage({
   searchParams,
@@ -19,6 +21,13 @@ export default async function LoginPage({
           <div className="mb-4">
             <Alert kind="error">{sp.error}</Alert>
           </div>
+        )}
+
+        {googleConfigured() && (
+          <>
+            <GoogleButton next={sp.next ?? "/"} />
+            <OrDivider />
+          </>
         )}
 
         <form action={loginAction} className="space-y-4">

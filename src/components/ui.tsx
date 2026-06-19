@@ -14,6 +14,7 @@ const photoStatusMap: Record<PhotoStatus, { label: string; cls: string }> = {
   REJECTED: { label: "Bị từ chối", cls: "bg-red-100 text-red-800" },
   HIDDEN: { label: "Đã ẩn", cls: "bg-gray-200 text-gray-700" },
   LOCKED: { label: "Đang swap", cls: "bg-fuchsia-100 text-fuchsia-800" },
+  DMCA_HOLD: { label: "Khiếu nại DMCA", cls: "bg-red-100 text-red-800" },
   REMOVED: { label: "Đã gỡ", cls: "bg-red-100 text-red-800" },
 };
 

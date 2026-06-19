@@ -2,6 +2,8 @@ import Link from "next/link";
 import { registerAction } from "../actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Alert } from "@/components/ui";
+import { GoogleButton, OrDivider } from "@/components/GoogleButton";
+import { googleConfigured } from "@/lib/google";
 
 export default async function RegisterPage({
   searchParams,
@@ -19,6 +21,13 @@ export default async function RegisterPage({
           <div className="mb-4">
             <Alert kind="error">{sp.error}</Alert>
           </div>
+        )}
+
+        {googleConfigured() && (
+          <>
+            <GoogleButton next={sp.next ?? "/"} label="Đăng ký với Google" />
+            <OrDivider />
+          </>
         )}
 
         <form action={registerAction} className="space-y-4">

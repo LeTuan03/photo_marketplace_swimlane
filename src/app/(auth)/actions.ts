@@ -52,7 +52,11 @@ export async function loginAction(formData: FormData) {
   const { email, password } = parsed.data!;
 
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user || !(await verifyPassword(password, user.passwordHash))) {
+  if (!user) back("/login", "Sai email hoặc mật khẩu", { email });
+  if (!user!.passwordHash) {
+    back("/login", "Tài khoản này đăng nhập bằng Google. Vui lòng dùng nút đăng nhập Google.", { email });
+  }
+  if (!(await verifyPassword(password, user!.passwordHash!))) {
     back("/login", "Sai email hoặc mật khẩu", { email });
   }
   if (user!.isBlocked) back("/login", "Tài khoản đã bị khóa");

@@ -6,8 +6,94 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { notify } from "@/lib/notifications";
 import { refundOrderItem } from "@/lib/commerce";
+import { upholdDmcaClaim, restoreDmcaClaim } from "@/lib/dmca";
+import { saveSettings } from "@/lib/settings";
 import { formatVnd } from "@/lib/money";
+import { LICENSE_ORDER } from "@/lib/constants";
 import type { SellerTier, KycStatus } from "@prisma/client";
+
+function intField(fd: FormData, key: string, fallback = 0): number {
+  const n = parseInt(String(fd.get(key) ?? ""), 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** AD2/AD3/AD4: lưu cấu hình giá & hoa hồng & gói. */
+export async function updatePlatformSettingsAction(formData: FormData) {
+  await requireRole("ADMIN");
+  const entries: Record<string, string> = {};
+
+  // AD4 hoa hồng theo tier (phần trăm 0..90)
+  for (const tier of ["NEW", "PRO", "ELITE"] as SellerTier[]) {
+    const pct = Math.min(90, Math.max(0, intField(formData, `comm_${tier}`)));
+    entries[`commission.${tier}`] = String(pct);
+  }
+
+  // AD3 gói subscription
+  entries["plan.PRO.price"] = String(Math.max(0, intField(formData, "plan_PRO_price")));
+  entries["plan.PRO.quota"] = String(Math.max(0, intField(formData, "plan_PRO_quota")));
+  entries["plan.UNLIMITED.price"] = String(Math.max(0, intField(formData, "plan_UNLIMITED_price")));
+  // -1 = không giới hạn
+  entries["plan.UNLIMITED.quota"] = String(intField(formData, "plan_UNLIMITED_quota", -1));
+
+  // AD2 giá license mặc định gợi ý
+  for (const lt of LICENSE_ORDER) {
+    entries[`license.${lt}.price`] = String(Math.max(0, intField(formData, `lic_${lt}`)));
+  }
+
+  await saveSettings(entries);
+  revalidatePath("/admin/settings");
+  redirect("/admin/settings?saved=1");
+}
+
+function slugify(name: string): string {
+  const base = name
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // bỏ dấu tiếng Việt
+    .replace(/[đĐ]/g, "d") // đ/Đ -> d
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50);
+  return base || "danh-muc";
+}
+
+/** AD1: thêm danh mục. */
+export async function createCategoryAction(formData: FormData) {
+  await requireRole("ADMIN");
+  const name = String(formData.get("name") ?? "").trim().slice(0, 60);
+  if (!name) redirect("/admin/categories?error=Tên danh mục trống");
+  let slug = slugify(name);
+  // đảm bảo slug duy nhất
+  if (await prisma.category.findUnique({ where: { slug } })) slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
+  const count = await prisma.category.count();
+  await prisma.category.create({ data: { name, slug, sortOrder: count } });
+  revalidatePath("/admin/categories");
+  redirect("/admin/categories");
+}
+
+/** AD1: đổi tên danh mục. */
+export async function updateCategoryAction(formData: FormData) {
+  await requireRole("ADMIN");
+  const id = String(formData.get("id") ?? "");
+  const name = String(formData.get("name") ?? "").trim().slice(0, 60);
+  if (id && name) await prisma.category.update({ where: { id }, data: { name } });
+  revalidatePath("/admin/categories");
+  redirect("/admin/categories");
+}
+
+/** AD1: xoá danh mục (gỡ liên kết khỏi ảnh trước). */
+export async function deleteCategoryAction(formData: FormData) {
+  await requireRole("ADMIN");
+  const id = String(formData.get("id") ?? "");
+  if (id) {
+    await prisma.$transaction(async (tx) => {
+      await tx.photo.updateMany({ where: { categoryId: id }, data: { categoryId: null } });
+      await tx.category.delete({ where: { id } });
+    });
+  }
+  revalidatePath("/admin/categories");
+  redirect("/admin/categories");
+}
 
 /** AD6 + N1: duyệt ảnh -> LIVE. */
 export async function approvePhotoAction(formData: FormData) {
@@ -86,15 +172,21 @@ export async function resolveDisputeAction(formData: FormData) {
   const disputeId = String(formData.get("disputeId") ?? "");
   const decision = String(formData.get("decision") ?? "");
   const orderItemId = String(formData.get("orderItemId") ?? "");
+  const percent = Math.min(100, Math.max(1, parseInt(String(formData.get("percent") ?? "100"), 10) || 100));
 
   const dispute = await prisma.dispute.findUnique({ where: { id: disputeId } });
   if (!dispute) redirect("/admin/disputes");
 
   if (decision === "refund") {
-    if (orderItemId) await refundOrderItem(orderItemId, dispute!.reason);
+    if (orderItemId) await refundOrderItem(orderItemId, dispute!.reason, percent);
     // gỡ ảnh nếu là DMCA
     if (dispute!.reason === "DMCA" && dispute!.photoId) {
       await prisma.photo.update({ where: { id: dispute!.photoId }, data: { status: "REMOVED" } });
+    }
+    // B9: lỗi thuộc về người bán -> trừ điểm uy tín
+    if (dispute!.photoId) {
+      const ph = await prisma.photo.findUnique({ where: { id: dispute!.photoId }, select: { sellerId: true } });
+      if (ph) await prisma.user.update({ where: { id: ph.sellerId }, data: { penaltyPoints: { increment: 1 } } });
     }
     await prisma.dispute.update({
       where: { id: disputeId },
@@ -108,6 +200,22 @@ export async function resolveDisputeAction(formData: FormData) {
   }
   revalidatePath("/admin/disputes");
   redirect("/admin/disputes");
+}
+
+/** AD7: admin phán quyết khiếu nại DMCA. */
+export async function resolveDmcaAction(formData: FormData) {
+  await requireRole("ADMIN");
+  const claimId = String(formData.get("claimId") ?? "");
+  const decision = String(formData.get("decision") ?? "");
+  const note = String(formData.get("note") ?? "").slice(0, 300);
+
+  if (decision === "uphold") {
+    await upholdDmcaClaim(claimId, note || "Quản trị viên chấp nhận khiếu nại.");
+  } else {
+    await restoreDmcaClaim(claimId, note || "Quản trị viên bác khiếu nại.");
+  }
+  revalidatePath("/admin/dmca");
+  redirect("/admin/dmca");
 }
 
 /** TT6: admin xử lý yêu cầu rút tiền (đánh dấu đã chi / từ chối hoàn tiền vào ví). */

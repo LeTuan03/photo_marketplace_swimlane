@@ -37,6 +37,12 @@ export default async function AdminUsersPage() {
             <span className={`badge ${kycBadge[u.kycStatus]}`}>KYC: {u.kycStatus}</span>
             {u.role !== "BUYER" && <span className="badge bg-brand-50 text-brand-700">{TIER_LABELS[u.sellerTier]}</span>}
             <span className="text-xs text-gray-400">{u._count.photos} ảnh</span>
+            {u.ratingCount > 0 && (
+              <span className="badge bg-amber-50 text-amber-700">★ {(u.ratingSum / u.ratingCount).toFixed(1)} ({u.ratingCount})</span>
+            )}
+            {u.penaltyPoints > 0 && (
+              <span className="badge bg-red-100 text-red-800">−{u.penaltyPoints} điểm phạt</span>
+            )}
 
             {u.role !== "ADMIN" && (
               <div className="flex flex-wrap items-center gap-2">

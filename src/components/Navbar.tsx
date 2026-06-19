@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Camera, Upload, ShoppingCart, LayoutDashboard, Shield, LogOut, Library, Bell, ArrowLeftRight, Sparkles } from "lucide-react";
+import { Camera, Upload, ShoppingCart, LayoutDashboard, Shield, LogOut, Library, Bell, ArrowLeftRight, Sparkles, Heart } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logoutAction } from "@/app/(auth)/actions";
@@ -55,6 +55,9 @@ export async function Navbar() {
                     {swapPending}
                   </span>
                 )}
+              </Link>
+              <Link href="/wishlist" className="hidden items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 lg:flex">
+                <Heart className="h-4 w-4" /> Yêu thích
               </Link>
               <Link href="/library" className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">
                 <Library className="h-4 w-4" /> Thư viện

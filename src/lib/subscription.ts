@@ -15,16 +15,16 @@ export type QuotaState = {
   resetAt: Date | null;
 };
 
-export function getQuotaState(user: User): QuotaState {
-  const limit = planQuota(user.planType);
+export function getQuotaState(user: User, limitOverride?: number): QuotaState {
+  const limit = limitOverride ?? planQuota(user.planType);
   const isActive =
     user.planType !== "FREE" && !!user.planRenewsAt && user.planRenewsAt > new Date();
   const remaining = limit < 0 ? Infinity : Math.max(0, limit - user.quotaUsed);
   return { plan: user.planType, isActive, limit, used: user.quotaUsed, remaining, resetAt: user.quotaResetAt };
 }
 
-export function canDownloadViaPlan(user: User): boolean {
-  const s = getQuotaState(user);
+export function canDownloadViaPlan(user: User, limitOverride?: number): boolean {
+  const s = getQuotaState(user, limitOverride);
   return s.isActive && s.remaining > 0;
 }
 
