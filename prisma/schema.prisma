@@ -1,0 +1,378 @@
+// Picseo — Marketplace mua bán & trao đổi ảnh online
+// Schema mô hình hóa các lane trong sơ đồ luồng (Admin/Seller/Buyer/Swap/Escrow/Notif)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================ ENUMS ============================
+
+enum Role {
+  BUYER
+  SELLER
+  ADMIN
+}
+
+enum SellerTier {
+  NEW
+  PRO
+  ELITE
+}
+
+enum KycStatus {
+  NONE
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum PhotoStatus {
+  DRAFT // người bán đang soạn
+  PENDING // chờ admin/AI duyệt (AD6)
+  LIVE // đã duyệt, hiển thị (S5)
+  REJECTED // bị từ chối (S5b)
+  HIDDEN // người bán ẩn tạm (S7)
+  LOCKED // đang trong giao dịch swap (SW3)
+  REMOVED // gỡ bỏ (DMCA / xoá)
+}
+
+enum LicenseType {
+  PERSONAL
+  COMMERCIAL
+  EXTENDED
+  EDITORIAL
+}
+
+enum OrderStatus {
+  PENDING // chờ thanh toán (TT1)
+  PAID // thanh toán thành công (TT2 -> TT3)
+  FAILED // thất bại (TT2b)
+  CANCELLED
+  REFUNDED
+}
+
+enum EscrowStatus {
+  HELD // giữ tạm 7 ngày (TT3)
+  RELEASED // đã giải ngân (TT4)
+  REFUNDED // hoàn cho buyer (TT5)
+  FROZEN // đóng băng do khiếu nại (TT5)
+}
+
+enum PayoutStatus {
+  REQUESTED
+  PROCESSING
+  PAID
+  REJECTED
+}
+
+enum DisputeStatus {
+  OPEN
+  RESOLVED_REFUND
+  RESOLVED_REJECT
+}
+
+enum NotificationType {
+  PHOTO_APPROVED // N1
+  PHOTO_REJECTED // N2
+  PHOTO_SOLD // N3
+  PURCHASE_OK // N4
+  REFUND_DONE // N9
+  PAYOUT_RELEASED // N10
+  ADMIN_ALERT // N12
+  GENERIC
+}
+
+enum WalletTxType {
+  ESCROW_RELEASE
+  PAYOUT
+  REFUND_ADJUST
+  ADJUSTMENT
+}
+
+// ============================ MODELS ============================
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  name         String
+  role         Role       @default(BUYER)
+  sellerTier   SellerTier @default(NEW)
+  kycStatus    KycStatus  @default(NONE)
+
+  // Ví người bán (VND)
+  balanceVnd Int @default(0) // số dư có thể rút (đã giải ngân khỏi escrow)
+
+  // Thông tin nhận tiền
+  payoutMethod  String? // BANK | PAYPAL
+  payoutAccount String?
+
+  isBlocked Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  photos        Photo[]
+  orders        Order[]
+  soldItems     OrderItem[]         @relation("ItemSeller")
+  cartItems     CartItem[]
+  payouts       Payout[]
+  notifications Notification[]
+  walletTxns    WalletTransaction[]
+  escrowHolds   EscrowHold[]        @relation("SellerEscrow")
+  downloads     DownloadGrant[]
+
+  @@index([role])
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  sortOrder Int      @default(0)
+  photos    Photo[]
+  createdAt DateTime @default(now())
+}
+
+model Photo {
+  id          String      @id @default(cuid())
+  seller      User        @relation(fields: [sellerId], references: [id])
+  sellerId    String
+  title       String
+  description String      @default("")
+  category    Category?   @relation(fields: [categoryId], references: [id])
+  categoryId  String?
+  tags        String[]    @default([])
+  status      PhotoStatus @default(PENDING)
+
+  // Khóa lưu trữ (storage keys)
+  originalKey String // file gốc (vault, không lộ ra ngoài)
+  previewKey  String // bản preview có watermark
+  thumbKey    String // thumbnail
+
+  width     Int @default(0)
+  height    Int @default(0)
+  sizeBytes Int @default(0)
+  format    String @default("jpeg")
+
+  hasModelRelease Boolean @default(false)
+  allowSwap       Boolean @default(false)
+
+  rejectionReason String?
+  reviewedAt      DateTime?
+  reviewedBy      String?
+
+  viewCount  Int @default(0)
+  salesCount Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  licenses   LicenseOption[]
+  orderItems OrderItem[]
+  cartItems  CartItem[]
+  downloads  DownloadGrant[]
+  disputes   Dispute[]
+
+  @@index([status])
+  @@index([sellerId])
+  @@index([categoryId])
+}
+
+model LicenseOption {
+  id       String      @id @default(cuid())
+  photo    Photo       @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  photoId  String
+  type     LicenseType
+  priceVnd Int
+
+  @@unique([photoId, type])
+}
+
+model CartItem {
+  id          String      @id @default(cuid())
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  photo       Photo       @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  photoId     String
+  licenseType LicenseType
+  sizeLabel   String      @default("ORIGINAL")
+  priceVnd    Int
+  createdAt   DateTime    @default(now())
+
+  @@unique([userId, photoId, licenseType])
+}
+
+model Coupon {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  percentOff Int      @default(0) // 0-100
+  active     Boolean  @default(true)
+  expiresAt  DateTime?
+  createdAt  DateTime @default(now())
+  orders     Order[]
+}
+
+model Order {
+  id     String      @id @default(cuid())
+  buyer  User        @relation(fields: [buyerId], references: [id])
+  buyerId String
+  status OrderStatus @default(PENDING)
+
+  subtotalVnd   Int @default(0)
+  discountVnd   Int @default(0)
+  totalVnd      Int @default(0)
+  platformFeeVnd Int @default(0)
+
+  coupon   Coupon? @relation(fields: [couponId], references: [id])
+  couponId String?
+
+  paymentProvider String? // VNPAY | MOMO
+  providerTxnRef  String? @unique // mã giao dịch gửi cổng (vnp_TxnRef)
+  providerTxnId   String? // mã giao dịch cổng trả về
+  payUrl          String?
+
+  createdAt DateTime  @default(now())
+  paidAt    DateTime?
+
+  items  OrderItem[]
+  escrow EscrowHold[]
+
+  @@index([buyerId])
+  @@index([status])
+}
+
+model OrderItem {
+  id      String @id @default(cuid())
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId String
+  photo   Photo  @relation(fields: [photoId], references: [id])
+  photoId String
+  seller  User   @relation("ItemSeller", fields: [sellerId], references: [id])
+  sellerId String
+
+  licenseType LicenseType
+  sizeLabel   String      @default("ORIGINAL")
+
+  priceVnd        Int
+  platformFeeVnd  Int
+  sellerEarningVnd Int
+
+  createdAt DateTime @default(now())
+
+  escrow   EscrowHold?
+  download DownloadGrant?
+
+  @@index([sellerId])
+  @@index([orderId])
+}
+
+model EscrowHold {
+  id          String       @id @default(cuid())
+  order       Order        @relation(fields: [orderId], references: [id])
+  orderId     String
+  orderItem   OrderItem    @relation(fields: [orderItemId], references: [id])
+  orderItemId String       @unique
+  seller      User         @relation("SellerEscrow", fields: [sellerId], references: [id])
+  sellerId    String
+  amountVnd   Int
+  status      EscrowStatus @default(HELD)
+  holdUntil   DateTime
+  releasedAt  DateTime?
+  createdAt   DateTime     @default(now())
+
+  @@index([status])
+  @@index([holdUntil])
+}
+
+model DownloadGrant {
+  id            String   @id @default(cuid())
+  orderItem     OrderItem @relation(fields: [orderItemId], references: [id])
+  orderItemId   String    @unique
+  buyer         User      @relation(fields: [buyerId], references: [id])
+  buyerId       String
+  photo         Photo     @relation(fields: [photoId], references: [id])
+  photoId       String
+  token         String    @unique
+  sizeLabel     String    @default("ORIGINAL")
+  licenseType   LicenseType
+  expiresAt     DateTime
+  maxDownloads  Int       @default(3)
+  downloadCount Int       @default(0)
+  certNo        String    @unique // mã chứng nhận license
+  createdAt     DateTime  @default(now())
+
+  @@index([buyerId])
+}
+
+model Payout {
+  id          String       @id @default(cuid())
+  seller      User         @relation(fields: [sellerId], references: [id])
+  sellerId    String
+  amountVnd   Int
+  method      String
+  destination String
+  status      PayoutStatus @default(REQUESTED)
+  note        String?
+  createdAt   DateTime     @default(now())
+  processedAt DateTime?
+
+  @@index([sellerId])
+  @@index([status])
+}
+
+model WalletTransaction {
+  id             String       @id @default(cuid())
+  user           User         @relation(fields: [userId], references: [id])
+  userId         String
+  type           WalletTxType
+  amountVnd      Int // có thể âm (payout/refund)
+  balanceAfterVnd Int
+  ref            String? // orderItemId / payoutId
+  note           String?
+  createdAt      DateTime     @default(now())
+
+  @@index([userId])
+}
+
+model Dispute {
+  id        String        @id @default(cuid())
+  photo     Photo?        @relation(fields: [photoId], references: [id])
+  photoId   String?
+  orderItemId String?
+  raisedById String
+  reason    String
+  detail    String        @default("")
+  status    DisputeStatus @default(OPEN)
+  resolution String?
+  createdAt DateTime      @default(now())
+  resolvedAt DateTime?
+
+  @@index([status])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  type      NotificationType @default(GENERIC)
+  title     String
+  body      String
+  link      String?
+  emailSent Boolean          @default(false)
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, readAt])
+}
+
+model PlatformSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

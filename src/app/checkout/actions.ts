@@ -1,0 +1,100 @@
+"use server";
+
+import { redirect } from "next/navigation";
+import { headers } from "next/headers";
+import { prisma } from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
+import { splitPrice, fulfillPaidOrder } from "@/lib/commerce";
+import { createPaymentUrl, isConfigured } from "@/lib/vnpay";
+import { makeTxnRef } from "@/lib/utils";
+
+/** Tạo đơn từ giỏ hàng và khởi tạo thanh toán (TT1 -> TT2). */
+export async function createOrderAndPayAction(formData: FormData) {
+  const user = await requireUser();
+  const couponCode = String(formData.get("coupon") ?? "").trim().toUpperCase();
+  const provider = String(formData.get("provider") ?? "VNPAY");
+
+  const cart = await prisma.cartItem.findMany({
+    where: { userId: user.id },
+    include: { photo: { include: { seller: { select: { id: true, sellerTier: true } } } } },
+  });
+  const valid = cart.filter((c) => c.photo.status === "LIVE" && c.photo.sellerId !== user.id);
+  if (valid.length === 0) redirect("/cart?error=Giỏ hàng trống");
+
+  const subtotal = valid.reduce((s, c) => s + c.priceVnd, 0);
+
+  // Coupon (B5)
+  let discount = 0;
+  let couponId: string | undefined;
+  if (couponCode) {
+    const coupon = await prisma.coupon.findUnique({ where: { code: couponCode } });
+    if (coupon && coupon.active && (!coupon.expiresAt || coupon.expiresAt > new Date())) {
+      discount = Math.round((subtotal * coupon.percentOff) / 100);
+      couponId = coupon.id;
+    }
+  }
+  const total = Math.max(0, subtotal - discount);
+  const txnRef = makeTxnRef();
+
+  // Tạo đơn + item, tính phí platform theo tier người bán (AD4)
+  const order = await prisma.order.create({
+    data: {
+      buyerId: user.id,
+      status: "PENDING",
+      subtotalVnd: subtotal,
+      discountVnd: discount,
+      totalVnd: total,
+      platformFeeVnd: 0,
+      couponId,
+      paymentProvider: provider,
+      providerTxnRef: txnRef,
+      items: {
+        create: valid.map((c) => {
+          const { platformFeeVnd, sellerEarningVnd } = splitPrice(c.priceVnd, c.photo.seller.sellerTier);
+          return {
+            photoId: c.photoId,
+            sellerId: c.photo.sellerId,
+            licenseType: c.licenseType,
+            sizeLabel: c.sizeLabel,
+            priceVnd: c.priceVnd,
+            platformFeeVnd,
+            sellerEarningVnd,
+          };
+        }),
+      },
+    },
+    include: { items: true },
+  });
+
+  const platformFee = order.items.reduce((s, i) => s + i.platformFeeVnd, 0) - discount;
+  await prisma.order.update({
+    where: { id: order.id },
+    data: { platformFeeVnd: Math.max(0, platformFee) },
+  });
+
+  // Xóa giỏ sau khi tạo đơn
+  await prisma.cartItem.deleteMany({ where: { userId: user.id } });
+
+  // Đơn miễn phí (coupon 100%) -> hoàn tất luôn
+  if (total === 0) {
+    await fulfillPaidOrder(order.id, "FREE");
+    redirect(`/payment/result?status=success&order=${order.id}`);
+  }
+
+  // VNPay thật nếu đã cấu hình; nếu chưa -> cổng giả lập cho dev
+  if (provider === "VNPAY" && isConfigured()) {
+    const h = await headers();
+    const ip = (h.get("x-forwarded-for") ?? "127.0.0.1").split(",")[0].trim();
+    const payUrl = createPaymentUrl({
+      amountVnd: total,
+      txnRef,
+      orderInfo: `Thanh toan don hang Picseo ${order.id.slice(-8)}`,
+      ipAddr: ip,
+    });
+    await prisma.order.update({ where: { id: order.id }, data: { payUrl } });
+    redirect(payUrl);
+  }
+
+  // Fallback: cổng giả lập (chưa cấu hình VNPay)
+  redirect(`/payment/mock?order=${order.id}`);
+}

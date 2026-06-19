@@ -1,0 +1,46 @@
+# Hạ tầng phụ trợ cho Picseo khi phát triển/chạy thật cục bộ.
+# Chạy: docker compose up -d
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: picseo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: picseo
+    ports:
+      - "5432:5432"
+    volumes:
+      - picseo_pgdata:/var/lib/postgresql/data
+
+  # MinIO: S3-compatible object storage (đặt STORAGE_DRIVER=s3 để dùng)
+  minio:
+    image: minio/minio:latest
+    container_name: picseo-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - picseo_minio:/data
+
+  # Tự tạo bucket "picseo" khi khởi động
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin) do sleep 1; done;
+      /usr/bin/mc mb -p local/picseo;
+      exit 0;
+      "
+
+volumes:
+  picseo_pgdata:
+  picseo_minio:
