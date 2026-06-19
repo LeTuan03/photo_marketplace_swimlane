@@ -42,16 +42,15 @@ function watermarkSvg(width: number, height: number, text = "PICSEO • PREVIEW"
 
 /** Tạo bản preview có watermark (webp). */
 export async function makeWatermarkedPreview(buffer: Buffer): Promise<Buffer> {
-  const base = sharp(buffer).rotate().resize({
-    width: PREVIEW_MAX,
-    height: PREVIEW_MAX,
-    fit: "inside",
-    withoutEnlargement: true,
-  });
-  const meta = await base.clone().metadata();
+  // Resize ra buffer trước để biết kích thước thật (metadata() bỏ qua các phép biến đổi đang chờ).
+  const resized = await sharp(buffer)
+    .rotate()
+    .resize({ width: PREVIEW_MAX, height: PREVIEW_MAX, fit: "inside", withoutEnlargement: true })
+    .toBuffer();
+  const meta = await sharp(resized).metadata();
   const w = meta.width ?? PREVIEW_MAX;
   const h = meta.height ?? PREVIEW_MAX;
-  return base
+  return sharp(resized)
     .composite([{ input: watermarkSvg(w, h), gravity: "northwest" }])
     .webp({ quality: 78 })
     .toBuffer();
