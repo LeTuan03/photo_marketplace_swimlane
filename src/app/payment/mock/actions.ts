@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { fulfillPaidOrder } from "@/lib/commerce";
+import { activateSubscription } from "@/lib/subscription";
 
 async function loadOwnPendingOrder(orderId: string) {
   const user = await requireUser();
@@ -28,4 +29,23 @@ export async function mockPayFailAction(formData: FormData) {
     await prisma.order.update({ where: { id: order.id }, data: { status: "FAILED" } });
   }
   redirect(`/payment/result?status=failed&order=${order.id}`);
+}
+
+export async function mockSubSuccessAction(formData: FormData) {
+  const user = await requireUser();
+  const subId = String(formData.get("subId") ?? "");
+  const sub = await prisma.subscription.findUnique({ where: { id: subId } });
+  if (!sub || sub.userId !== user.id) redirect("/subscription?error=Không hợp lệ");
+  if (sub!.status === "PENDING") await activateSubscription(sub!.id, `MOCK-${Date.now()}`);
+  redirect("/subscription?activated=1");
+}
+
+export async function mockSubFailAction(formData: FormData) {
+  const user = await requireUser();
+  const subId = String(formData.get("subId") ?? "");
+  const sub = await prisma.subscription.findUnique({ where: { id: subId } });
+  if (sub && sub.userId === user.id && sub.status === "PENDING") {
+    await prisma.subscription.update({ where: { id: sub.id }, data: { status: "CANCELLED" } });
+  }
+  redirect("/subscription?error=Thanh toán thất bại");
 }

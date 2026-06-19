@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifySignature, isPaymentSuccess } from "@/lib/vnpay";
 import { fulfillPaidOrder } from "@/lib/commerce";
+import { activateSubscription } from "@/lib/subscription";
 
 /**
  * IPN (Instant Payment Notification): VNPay gọi server-to-server để xác nhận.
@@ -15,23 +16,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ RspCode: "97", Message: "Invalid signature" });
   }
 
-  const order = await prisma.order.findUnique({ where: { providerTxnRef: query.vnp_TxnRef } });
-  if (!order) return NextResponse.json({ RspCode: "01", Message: "Order not found" });
-
   const paidAmount = Number(query.vnp_Amount) / 100;
-  if (paidAmount !== order.totalVnd) {
-    return NextResponse.json({ RspCode: "04", Message: "Invalid amount" });
+  const success = isPaymentSuccess(query);
+
+  const order = await prisma.order.findUnique({ where: { providerTxnRef: query.vnp_TxnRef } });
+  if (order) {
+    if (paidAmount !== order.totalVnd) return NextResponse.json({ RspCode: "04", Message: "Invalid amount" });
+    if (order.status === "PAID") return NextResponse.json({ RspCode: "02", Message: "Order already confirmed" });
+    if (success) await fulfillPaidOrder(order.id, query.vnp_TransactionNo);
+    else await prisma.order.update({ where: { id: order.id }, data: { status: "FAILED" } });
+    return NextResponse.json({ RspCode: "00", Message: "Confirm Success" });
   }
 
-  if (order.status === "PAID") {
-    return NextResponse.json({ RspCode: "02", Message: "Order already confirmed" });
+  const sub = await prisma.subscription.findUnique({ where: { providerTxnRef: query.vnp_TxnRef } });
+  if (sub) {
+    if (paidAmount !== sub.priceVnd) return NextResponse.json({ RspCode: "04", Message: "Invalid amount" });
+    if (sub.status === "ACTIVE") return NextResponse.json({ RspCode: "02", Message: "Already confirmed" });
+    if (success) await activateSubscription(sub.id, query.vnp_TransactionNo);
+    return NextResponse.json({ RspCode: "00", Message: "Confirm Success" });
   }
 
-  if (isPaymentSuccess(query)) {
-    await fulfillPaidOrder(order.id, query.vnp_TransactionNo);
-  } else {
-    await prisma.order.update({ where: { id: order.id }, data: { status: "FAILED" } });
-  }
-
-  return NextResponse.json({ RspCode: "00", Message: "Confirm Success" });
+  return NextResponse.json({ RspCode: "01", Message: "Order not found" });
 }

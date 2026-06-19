@@ -19,8 +19,9 @@ Bám theo 6 lane trong sơ đồ:
 | **Người bán** | Đăng ký bán (S1), **upload + watermark + metadata** (S2–S4), trạng thái duyệt (S5/S5b), **sửa/ẩn/xóa** (S6/S7), **xem thu nhập + escrow + rút tiền** (S8/S9) |
 | **Người mua** | Đăng ký/đăng nhập (B1), **tìm kiếm + lọc** (B2), **chi tiết + preview watermark** (B3), **chọn license & size** (B4), **giỏ hàng + coupon** (B5), **tải file gốc** (B6), **thư viện + certificate + tải lại ≤3 lần** (B11), **báo cáo sự cố/DMCA** (B9/B10) |
 | **Thanh toán & Escrow** | Tính tiền (TT1), **cổng VNPay** (TT2) + cổng giả lập, **escrow giữ 7 ngày** (TT3), **giải ngân** qua cron (TT4), **hoàn tiền** khi có khiếu nại (TT5), **rút tiền** (TT6) |
-| **Thông báo** | Trung tâm thông báo + email cho: duyệt/từ chối ảnh (N1/N2), có người mua (N3), mua thành công (N4), hoàn tiền (N9), giải ngân (N10), alert admin (N12) |
-| **Trao đổi (Swap)** | *Để pha sau* — xem mục [Lộ trình](#7-lộ-trình-pha-tiếp-theo) |
+| **Thông báo** | Trung tâm thông báo + email cho: duyệt/từ chối ảnh (N1/N2), có người mua (N3), mua thành công (N4), swap (N5/N6/N7), hoàn tiền (N9), giải ngân (N10), quota gần hết (N11), alert admin (N12) |
+| **Trao đổi (Swap)** | **Đầy đủ SW1–SW7**: gửi đề nghị (SW1), nhận + xem (SW2), chấp nhận/từ chối 48h (SW3/SW3b), khóa 2 ảnh (SW3), ký xác nhận cuối 2 bên (SW4), hoàn tất + cấp quyền chéo + certificate (SW5), huỷ giữa chừng mở khóa (SW6), gợi ý bù tiền khi lệch giá >30% (SW7) |
+| **Subscription & quota** | **Đầy đủ**: gói Free/Pro (10 ảnh/tháng)/Unlimited (AD3), đăng ký + thanh toán (B7), tải bằng quota (“Còn quota?” → tải miễn phí), reset theo kỳ, cảnh báo quota gần hết (N11), hết hạn → hạ Free (TT7) |
 
 ---
 
@@ -44,8 +45,10 @@ cp .env.example .env        # Windows: copy .env.example .env
 # 3. Khởi động PostgreSQL (và MinIO) bằng Docker
 docker compose up -d
 
-# 4. Tạo bảng trong DB
+# 4. Tạo bảng trong DB (gồm cả Swap & Subscription)
 npx prisma migrate dev --name init
+# Nếu đã migrate trước đó và vừa cập nhật schema (swap/subscription):
+#   npx prisma migrate dev --name swap_subscription
 
 # 5. Nạp dữ liệu mẫu (tài khoản demo + ảnh + coupon)
 npm run db:seed
@@ -106,28 +109,32 @@ IPN là nguồn xác nhận đáng tin cậy; callback dùng để hiển thị 
 
 ---
 
-## 6. Giải ngân escrow (cron)
+## 6. Tác vụ định kỳ (cron)
 
-Escrow giữ tiền `ESCROW_HOLD_DAYS` ngày rồi giải ngân vào ví người bán. Chạy định kỳ:
+Hai endpoint cron (bảo vệ bằng `CRON_SECRET`):
 
 ```bash
+# Chỉ giải ngân escrow đến hạn (TT4)
 curl "http://localhost:3000/api/cron/escrow-release?secret=<CRON_SECRET>"
+
+# Bảo trì tổng hợp: giải ngân escrow + hết hạn swap 48h (SW3b) + hết hạn subscription -> hạ Free (TT7)
+curl "http://localhost:3000/api/cron/maintenance?secret=<CRON_SECRET>"
 ```
 
-Trên production: dùng cron của hệ điều hành, Vercel Cron, hoặc một scheduler gọi URL trên (kèm
-header `x-cron-secret`) mỗi giờ/ngày.
+Trên production: dùng cron hệ điều hành, Vercel Cron, hoặc scheduler gọi `/api/cron/maintenance`
+(kèm header `x-cron-secret`) mỗi giờ. Swap hết hạn cũng được dọn “lười” mỗi khi mở trang `/swap`.
 
 ---
 
 ## 7. Lộ trình pha tiếp theo
 
-Các phần trong sơ đồ chưa làm trong MVP (đã chuẩn bị sẵn schema/enum để mở rộng):
+Các phần trong sơ đồ chưa làm (đã chuẩn bị schema/enum để mở rộng):
 
-- **Trao đổi (Swap)** — lane 4 (SW1–SW7): offer, khóa 2 ảnh, ký xác nhận, bù tiền khi lệch giá.
-  Trường `Photo.allowSwap` và enum `PhotoStatus.LOCKED` đã có sẵn.
-- **Subscription & quota** (AD3, B7, TT7): gói Free/Pro/Unlimited, tải theo quota.
+- **Auto-charge định kỳ cho subscription**: hiện chưa trừ tiền tự động — hết kỳ sẽ hạ về Free (mô phỏng TT7).
+  Cần tích hợp token thẻ / recurring của cổng thanh toán.
 - **AI tagging / AI search** thực thụ (hiện dùng tag thủ công + tìm kiếm full-text).
-- **KYC tự động**, **counter-claim DMCA 7 ngày**, **wishlist + alert giá** (B12).
+- **Bù tiền mặt khi swap lệch giá (SW7)**: hiện chỉ *gợi ý* mức bù; chưa thu tiền top-up qua escrow.
+- **KYC tự động**, **counter-claim DMCA 7 ngày**, **wishlist + alert giá** (B12), **bồi thường credit khi huỷ swap (SW6)**.
 
 ---
 

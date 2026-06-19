@@ -47,7 +47,11 @@ export default async function LibraryPage({
                 </Link>
                 <div className="space-y-2 p-3">
                   <p className="truncate font-medium text-gray-900">{g.photo.title}</p>
-                  <p className="text-xs text-gray-500">License: {LICENSE_LABELS[g.licenseType]} · Size: {g.sizeLabel}</p>
+                  <p className="text-xs text-gray-500">
+                    License: {LICENSE_LABELS[g.licenseType]} · Size: {g.sizeLabel}
+                    {g.source === "SWAP" && <span className="badge ml-1 bg-fuchsia-100 text-fuchsia-700">Swap</span>}
+                    {g.source === "SUBSCRIPTION" && <span className="badge ml-1 bg-emerald-100 text-emerald-700">Gói</span>}
+                  </p>
                   <p className="flex items-center gap-1 text-xs text-emerald-700">
                     <BadgeCheck className="h-3.5 w-3.5" /> Cert: {g.certNo}
                   </p>

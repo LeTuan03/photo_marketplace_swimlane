@@ -6,6 +6,9 @@ import { publicAssetUrl } from "@/lib/storage";
 import { formatVnd } from "@/lib/money";
 import { LICENSE_LABELS, LICENSE_DESCRIPTIONS, LICENSE_ORDER, SIZE_LABELS } from "@/lib/constants";
 import { addToCartAction, reportPhotoAction } from "@/app/cart/actions";
+import { subscriptionDownloadAction } from "@/app/subscription/actions";
+import { getCurrentUser } from "@/lib/auth";
+import { getQuotaState } from "@/lib/subscription";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Alert } from "@/components/ui";
 
@@ -30,6 +33,11 @@ export default async function PhotoDetailPage({
     },
   });
   if (!photo || (photo.status !== "LIVE" && photo.status !== "LOCKED")) notFound();
+
+  const viewer = await getCurrentUser();
+  const isOwner = viewer?.id === photo.seller.id;
+  const quota = viewer ? getQuotaState(viewer) : null;
+  const canSubDownload = Boolean(quota?.isActive && !isOwner && (quota!.remaining > 0 || (quota!.resetAt && quota!.resetAt <= new Date())));
 
   await prisma.photo.update({ where: { id }, data: { viewCount: { increment: 1 } } }).catch(() => {});
 
@@ -114,9 +122,25 @@ export default async function PhotoDetailPage({
               </div>
             </form>
 
-            {photo.allowSwap && (
-              <p className="mt-3 flex items-center gap-1.5 text-xs text-fuchsia-700">
-                <Repeat className="h-3.5 w-3.5" /> Người bán chấp nhận trao đổi (swap) ảnh.
+            {canSubDownload && (
+              <form action={subscriptionDownloadAction} className="mt-3 border-t border-gray-100 pt-3">
+                <input type="hidden" name="photoId" value={photo.id} />
+                <input type="hidden" name="sizeLabel" value="ORIGINAL" />
+                <SubmitButton className="btn-ghost w-full border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                  Tải miễn phí bằng gói {quota!.plan}
+                  {quota!.limit > 0 ? ` · còn ${quota!.remaining} lượt` : " · không giới hạn"}
+                </SubmitButton>
+              </form>
+            )}
+
+            {photo.allowSwap && !isOwner && (
+              <Link href={`/swap/new?target=${photo.id}`} className="btn-outline mt-3 w-full border-fuchsia-300 text-fuchsia-700 hover:bg-fuchsia-50">
+                <Repeat className="h-4 w-4" /> Đề nghị trao đổi (swap)
+              </Link>
+            )}
+            {photo.allowSwap && isOwner && (
+              <p className="mt-3 flex items-center gap-1.5 text-xs text-gray-500">
+                <Repeat className="h-3.5 w-3.5" /> Ảnh này của bạn đang mở nhận trao đổi.
               </p>
             )}
           </div>

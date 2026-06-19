@@ -81,10 +81,43 @@ enum NotificationType {
   PHOTO_REJECTED // N2
   PHOTO_SOLD // N3
   PURCHASE_OK // N4
+  SWAP_OFFER // N5
+  SWAP_ACCEPTED // N6
+  SWAP_DECLINED // N7
   REFUND_DONE // N9
   PAYOUT_RELEASED // N10
+  QUOTA_LOW // N11
+  SUB_ACTIVATED
   ADMIN_ALERT // N12
   GENERIC
+}
+
+enum GrantSource {
+  PURCHASE
+  SWAP
+  SUBSCRIPTION
+}
+
+enum SwapStatus {
+  PENDING // chờ B trả lời (SW1/SW2)
+  ACCEPTED // B đồng ý, 2 ảnh bị khóa, chờ xác nhận cuối (SW3/SW4)
+  COMPLETED // hoàn tất, đã cấp quyền (SW5)
+  DECLINED // B từ chối (SW3b)
+  EXPIRED // quá 48h (SW3b)
+  CANCELLED // một bên huỷ giữa chừng (SW6)
+}
+
+enum PlanType {
+  FREE
+  PRO
+  UNLIMITED
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  CANCELLED
 }
 
 enum WalletTxType {
@@ -114,6 +147,12 @@ model User {
 
   isBlocked Boolean @default(false)
 
+  // Gói subscription (AD3 / B7)
+  planType     PlanType  @default(FREE)
+  planRenewsAt DateTime?
+  quotaUsed    Int       @default(0)
+  quotaResetAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -126,6 +165,9 @@ model User {
   walletTxns    WalletTransaction[]
   escrowHolds   EscrowHold[]        @relation("SellerEscrow")
   downloads     DownloadGrant[]
+  swapsSent     SwapOffer[]         @relation("SwapInitiator")
+  swapsReceived SwapOffer[]         @relation("SwapResponder")
+  subscriptions Subscription[]
 
   @@index([role])
 }
@@ -173,11 +215,13 @@ model Photo {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  licenses   LicenseOption[]
-  orderItems OrderItem[]
-  cartItems  CartItem[]
-  downloads  DownloadGrant[]
-  disputes   Dispute[]
+  licenses       LicenseOption[]
+  orderItems     OrderItem[]
+  cartItems      CartItem[]
+  downloads      DownloadGrant[]
+  disputes       Dispute[]
+  offeredSwaps   SwapOffer[]     @relation("OfferedInSwap")
+  requestedSwaps SwapOffer[]     @relation("RequestedInSwap")
 
   @@index([status])
   @@index([sellerId])
@@ -291,21 +335,23 @@ model EscrowHold {
 }
 
 model DownloadGrant {
-  id            String   @id @default(cuid())
-  orderItem     OrderItem @relation(fields: [orderItemId], references: [id])
-  orderItemId   String    @unique
-  buyer         User      @relation(fields: [buyerId], references: [id])
+  id            String      @id @default(cuid())
+  orderItem     OrderItem?  @relation(fields: [orderItemId], references: [id])
+  orderItemId   String?     @unique
+  source        GrantSource @default(PURCHASE)
+  swapOfferId   String? // truy vết nếu cấp qua swap
+  buyer         User        @relation(fields: [buyerId], references: [id])
   buyerId       String
-  photo         Photo     @relation(fields: [photoId], references: [id])
+  photo         Photo       @relation(fields: [photoId], references: [id])
   photoId       String
-  token         String    @unique
-  sizeLabel     String    @default("ORIGINAL")
+  token         String      @unique
+  sizeLabel     String      @default("ORIGINAL")
   licenseType   LicenseType
   expiresAt     DateTime
-  maxDownloads  Int       @default(3)
-  downloadCount Int       @default(0)
-  certNo        String    @unique // mã chứng nhận license
-  createdAt     DateTime  @default(now())
+  maxDownloads  Int         @default(3)
+  downloadCount Int         @default(0)
+  certNo        String      @unique // mã chứng nhận license
+  createdAt     DateTime    @default(now())
 
   @@index([buyerId])
 }
@@ -369,6 +415,53 @@ model Notification {
   createdAt DateTime         @default(now())
 
   @@index([userId, readAt])
+}
+
+model SwapOffer {
+  id          String     @id @default(cuid())
+  initiator   User       @relation("SwapInitiator", fields: [initiatorId], references: [id])
+  initiatorId String
+  responder   User       @relation("SwapResponder", fields: [responderId], references: [id])
+  responderId String
+
+  offeredPhoto     Photo  @relation("OfferedInSwap", fields: [offeredPhotoId], references: [id])
+  offeredPhotoId   String
+  requestedPhoto   Photo  @relation("RequestedInSwap", fields: [requestedPhotoId], references: [id])
+  requestedPhotoId String
+
+  message           String     @default("")
+  status            SwapStatus @default(PENDING)
+  suggestedTopUpVnd Int        @default(0) // SW7: gợi ý bù tiền nếu lệch >30%
+
+  initiatorConfirmed Boolean @default(false) // SW4 ký xác nhận cuối
+  responderConfirmed Boolean @default(false)
+
+  cancelReason String?
+  expiresAt    DateTime
+  respondedAt  DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([responderId, status])
+  @@index([initiatorId, status])
+  @@index([status])
+}
+
+model Subscription {
+  id               String             @id @default(cuid())
+  user             User               @relation(fields: [userId], references: [id])
+  userId           String
+  plan             PlanType
+  status           SubscriptionStatus @default(PENDING)
+  priceVnd         Int
+  autoRenew        Boolean            @default(true)
+  providerTxnRef   String?            @unique
+  startedAt        DateTime?
+  currentPeriodEnd DateTime?
+  createdAt        DateTime           @default(now())
+
+  @@index([userId])
+  @@index([status])
 }
 
 model PlatformSetting {

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import type { PhotoStatus, OrderStatus, PayoutStatus, EscrowStatus } from "@prisma/client";
+import type { PhotoStatus, OrderStatus, PayoutStatus, EscrowStatus, SwapStatus } from "@prisma/client";
 import { formatVnd } from "@/lib/money";
 
 export function Price({ amount, className = "" }: { amount: number; className?: string }) {
@@ -38,6 +38,20 @@ const escrowStatusMap: Record<EscrowStatus, { label: string; cls: string }> = {
   REFUNDED: { label: "Đã hoàn", cls: "bg-orange-100 text-orange-800" },
   FROZEN: { label: "Đóng băng", cls: "bg-red-100 text-red-800" },
 };
+
+const swapStatusMap: Record<SwapStatus, { label: string; cls: string }> = {
+  PENDING: { label: "Chờ trả lời", cls: "bg-amber-100 text-amber-800" },
+  ACCEPTED: { label: "Chờ xác nhận cuối", cls: "bg-fuchsia-100 text-fuchsia-800" },
+  COMPLETED: { label: "Hoàn tất", cls: "bg-emerald-100 text-emerald-800" },
+  DECLINED: { label: "Từ chối", cls: "bg-gray-200 text-gray-700" },
+  EXPIRED: { label: "Hết hạn", cls: "bg-gray-200 text-gray-700" },
+  CANCELLED: { label: "Đã huỷ", cls: "bg-red-100 text-red-800" },
+};
+
+export function SwapStatusBadge({ status }: { status: SwapStatus }) {
+  const m = swapStatusMap[status];
+  return <span className={`badge ${m.cls}`}>{m.label}</span>;
+}
 
 export function PhotoStatusBadge({ status }: { status: PhotoStatus }) {
   const m = photoStatusMap[status];

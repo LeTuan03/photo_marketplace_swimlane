@@ -1,4 +1,4 @@
-import type { LicenseType, SellerTier } from "@prisma/client";
+import type { LicenseType, SellerTier, PlanType } from "@prisma/client";
 
 // --- License (AD2) ---
 export const LICENSE_LABELS: Record<LicenseType, string> = {
@@ -66,4 +66,37 @@ export const DEFAULT_CATEGORIES = [
 
 export function commissionRate(tier: SellerTier): number {
   return COMMISSION_RATE[tier] ?? 0.3;
+}
+
+// --- Subscription (AD3 / B7) ---
+export const PLAN_LABELS: Record<PlanType, string> = {
+  FREE: "Free",
+  PRO: "Pro",
+  UNLIMITED: "Unlimited",
+};
+
+// Giá theo tháng (VND). FREE = 0.
+export const PLAN_PRICE: Record<PlanType, number> = {
+  FREE: 0,
+  PRO: 199_000,
+  UNLIMITED: 499_000,
+};
+
+// Số ảnh tải/tháng. -1 = không giới hạn.
+export const PLAN_QUOTA: Record<PlanType, number> = {
+  FREE: 0,
+  PRO: 10,
+  UNLIMITED: -1,
+};
+
+export const PLAN_DESCRIPTIONS: Record<PlanType, string> = {
+  FREE: "Xem preview có watermark. Mua lẻ từng ảnh theo license.",
+  PRO: "Tải 10 ảnh/tháng không cần mua lẻ. Phù hợp cá nhân & freelancer.",
+  UNLIMITED: "Tải không giới hạn mỗi tháng. Dành cho team & agency.",
+};
+
+export const PLAN_PERIOD_DAYS = 30;
+
+export function planQuota(plan: PlanType): number {
+  return PLAN_QUOTA[plan] ?? 0;
 }
