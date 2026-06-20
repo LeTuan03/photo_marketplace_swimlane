@@ -1,23 +1,36 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useState, useTransition } from "react";
 import type { ReactNode } from "react";
 
 export type DownloadResult = { url?: string; error?: string };
 
-type DownloadAction = (
-  prev: DownloadResult | null,
-  formData: FormData,
-) => Promise<DownloadResult>;
+type DownloadAction = (formData: FormData) => Promise<DownloadResult>;
+
+/** Lấy tên file từ header Content-Disposition (ưu tiên filename* UTF-8). */
+function filenameFrom(cd: string | null): string {
+  if (!cd) return "picseo";
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1]);
+    } catch {
+      /* rơi xuống filename thường */
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(cd);
+  return plain ? plain[1] : "picseo";
+}
 
 /**
- * Nút tải dùng server action TRẢ VỀ url (không redirect sang /api/download).
+ * Nút tải: server action TRẢ VỀ url, client tự FETCH rồi lưu file qua blob.
  *
- * Vì sao không redirect: /api/download trả file đính kèm (Content-Disposition:
- * attachment) -> trình duyệt TẢI file chứ không điều hướng trang, nên transition
- * của form không bao giờ "hoàn tất" và nút kẹt mãi ở trạng thái "Đang xử lý...".
- * Ở đây action trả url, client tự kích hoạt tải qua thẻ <a> ẩn -> trang đứng yên,
- * isPending tự thoát khi action trả kết quả.
+ * Vì sao không redirect / không điều hướng <a> tới /api/download:
+ *  - /api/download trả file đính kèm -> nếu redirect, trình duyệt tải file nhưng
+ *    transition của form không "hoàn tất" -> nút kẹt mãi ở "Đang xử lý...".
+ *  - Nếu điều hướng <a> mà server trả LỖI (403/500 dạng text) thì cả trang bị thay
+ *    bằng đoạn text lỗi thô.
+ * Dùng fetch: tải xong thì lưu blob (trang đứng yên), lỗi thì đọc text hiện inline.
  */
 export function DownloadButton({
   action,
@@ -32,30 +45,47 @@ export function DownloadButton({
   pendingText?: string;
   children: ReactNode;
 }) {
-  const [state, formAction, isPending] = useActionState(action, null);
-  const firedFor = useRef<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
 
-  useEffect(() => {
-    const url = state?.url;
-    if (!url || firedFor.current === url) return; // chống bắn 2 lần (StrictMode)
-    firedFor.current = url;
-    const a = document.createElement("a");
-    a.href = url; // KHÔNG đặt download attr để dùng filename* từ header server
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }, [state]);
+  function onClick() {
+    setError(null);
+    startTransition(async () => {
+      const fd = new FormData();
+      for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+
+      const result = await action(fd);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      if (!result.url) return;
+
+      const res = await fetch(result.url);
+      if (!res.ok) {
+        // Server trả lỗi (vd hết lượt) -> hiện inline, KHÔNG rời trang.
+        setError((await res.text()) || "Không tải được file.");
+        return;
+      }
+      const blob = await res.blob();
+      const name = filenameFrom(res.headers.get("Content-Disposition"));
+      const obj = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = obj;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(obj);
+    });
+  }
 
   return (
-    <form action={formAction}>
-      {Object.entries(fields).map(([k, v]) => (
-        <input key={k} type="hidden" name={k} value={v} />
-      ))}
-      <button type="submit" className={className} disabled={isPending}>
-        {isPending ? pendingText : children}
+    <div>
+      <button type="button" onClick={onClick} disabled={pending} className={className}>
+        {pending ? pendingText : children}
       </button>
-      {state?.error && <p className="mt-1 text-xs text-red-600">{state.error}</p>}
-    </form>
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
   );
 }

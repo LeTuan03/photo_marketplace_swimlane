@@ -12,7 +12,7 @@ function dbUrl() {
 }
 
 const SES = "cmqlyv6nu000am0h5bixzwflc"; // user letuan trong phiên đang test
-const TARGET = "cmqmeazpf0005w3lybat35ib9"; // grant đang bấm tải
+const TARGET = "cmqmes6tf00028qhc03zbgo79"; // grant đang bấm tải (mới nhất)
 
 const prisma = new PrismaClient({ datasources: { db: { url: dbUrl() } } });
 try {

@@ -107,10 +107,7 @@ export async function cancelSubscriptionAction() {
  * TRẢ url cho client tự kích hoạt tải (không redirect) để nút không kẹt pending —
  * xem giải thích trong components/DownloadButton.tsx.
  */
-export async function subscriptionDownloadAction(
-  _prev: DownloadResult | null,
-  formData: FormData,
-): Promise<DownloadResult> {
+export async function subscriptionDownloadAction(formData: FormData): Promise<DownloadResult> {
   let user = await requireUser();
   const photoId = String(formData.get("photoId") ?? "");
   const sizeLabel = validSizeLabel(String(formData.get("sizeLabel") ?? "ORIGINAL"));
@@ -133,6 +130,10 @@ export async function subscriptionDownloadAction(
 
   let grantId: string;
   if (existing) {
+    // Grant tái dùng có thể đã hết lượt tải -> báo rõ thay vì để /api/download trả 403.
+    if (existing.downloadCount >= existing.maxDownloads) {
+      return { error: `Ảnh này đã tải tối đa ${existing.maxDownloads} lần.` };
+    }
     grantId = existing.id;
   } else {
     // Tiêu thụ quota + tạo grant NGUYÊN TỬ: với gói có giới hạn, chỉ tăng quotaUsed

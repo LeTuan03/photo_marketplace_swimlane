@@ -10,10 +10,7 @@ import type { DownloadResult } from "@/components/DownloadButton";
  * TRẢ url cho client tự kích hoạt tải (không redirect) để nút không kẹt pending —
  * xem giải thích trong components/DownloadButton.tsx.
  */
-export async function requestDownloadAction(
-  _prev: DownloadResult | null,
-  formData: FormData,
-): Promise<DownloadResult> {
+export async function requestDownloadAction(formData: FormData): Promise<DownloadResult> {
   const user = await requireUser();
   const grantId = String(formData.get("grantId") ?? "");
 
