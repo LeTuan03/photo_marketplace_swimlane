@@ -60,13 +60,14 @@ export const env = {
     createUrl: str("PAYOS_CREATE_URL", "https://api-merchant.payos.vn/v2/payment-requests"),
   },
 
-  // Chuyển khoản VietQR + giám sát biến động số dư qua SePay (hoặc Casso)
+  // Chuyển khoản VietQR — xác nhận THỦ CÔNG qua biến động số dư (admin đối chiếu).
   bank: {
-    bankId: str("BANK_ID"), // mã NH cho VietQR/SePay, vd: MBBank, Vietcombank, ACB
+    bankId: str("BANK_ID"), // mã NH cho VietQR động (vietqr.io), vd: MB, VCB, ACB
     account: str("BANK_ACCOUNT"), // số tài khoản nhận tiền
     accountName: str("BANK_ACCOUNT_NAME"), // tên chủ tài khoản (hiển thị)
-    sepayApiKey: str("SEPAY_API_KEY"), // token xác thực webhook (Authorization: Apikey ...)
-    qrUrl: str("SEPAY_QR_URL", "https://qr.sepay.vn/img"),
+    qrImage: str("BANK_QR_IMAGE"), // URL/đường dẫn ảnh QR tĩnh của TK (ưu tiên nếu có)
+    qrTemplate: str("BANK_QR_TEMPLATE", "compact2"), // mẫu QR động vietqr.io
+    sepayApiKey: str("SEPAY_API_KEY"), // tuỳ chọn: bật webhook tự xác nhận (SePay/Casso)
   },
 
   google: {

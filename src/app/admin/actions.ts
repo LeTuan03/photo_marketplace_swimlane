@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { notify } from "@/lib/notifications";
-import { refundOrderItem } from "@/lib/commerce";
+import { refundOrderItem, fulfillPaidOrder } from "@/lib/commerce";
+import { activateSubscription } from "@/lib/subscription";
 import { upholdDmcaClaim, restoreDmcaClaim } from "@/lib/dmca";
 import { saveSettings } from "@/lib/settings";
 import { formatVnd } from "@/lib/money";
@@ -216,6 +217,42 @@ export async function resolveDmcaAction(formData: FormData) {
   }
   revalidatePath("/admin/dmca");
   redirect("/admin/dmca");
+}
+
+/**
+ * Xác nhận đã NHẬN ĐƯỢC tiền chuyển khoản (đối chiếu thủ công qua biến động số dư)
+ * -> hoàn tất đơn hàng hoặc kích hoạt gói. Idempotent + atomic ở tầng lib.
+ */
+export async function confirmBankPaymentAction(formData: FormData) {
+  const admin = await requireRole("ADMIN");
+  const kind = String(formData.get("kind") ?? "order");
+  const id = String(formData.get("id") ?? "");
+  const txnId = `BANK-MANUAL-${admin.id.slice(-6)}`;
+
+  if (kind === "sub") {
+    const sub = await prisma.subscription.findUnique({ where: { id } });
+    if (sub && sub.status === "PENDING") await activateSubscription(sub.id, txnId);
+  } else {
+    const order = await prisma.order.findUnique({ where: { id } });
+    if (order && order.status === "PENDING") await fulfillPaidOrder(order.id, txnId);
+  }
+  revalidatePath("/admin/payments");
+  redirect("/admin/payments");
+}
+
+/** Hủy đơn/gói đang chờ chuyển khoản (không nhận được tiền hoặc quá hạn). */
+export async function rejectBankPaymentAction(formData: FormData) {
+  await requireRole("ADMIN");
+  const kind = String(formData.get("kind") ?? "order");
+  const id = String(formData.get("id") ?? "");
+
+  if (kind === "sub") {
+    await prisma.subscription.updateMany({ where: { id, status: "PENDING" }, data: { status: "CANCELLED" } });
+  } else {
+    await prisma.order.updateMany({ where: { id, status: "PENDING" }, data: { status: "FAILED" } });
+  }
+  revalidatePath("/admin/payments");
+  redirect("/admin/payments");
 }
 
 /** TT6: admin xử lý yêu cầu rút tiền (đánh dấu đã chi / từ chối hoàn tiền vào ví). */
