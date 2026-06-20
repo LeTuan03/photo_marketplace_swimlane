@@ -44,40 +44,43 @@ export async function GET(req: NextRequest) {
     return new NextResponse("Đã vượt quá số lần tải cho phép.", { status: 403 });
   }
 
-  let buffer: Buffer;
+  // QUAN TRỌNG: mọi thao tác có thể lỗi SAU khi đã giành lượt (đọc storage, resize,
+  // dựng filename, dựng response) đều nằm trong try/catch này. Trước đây phần dựng
+  // response nằm NGOÀI try -> khi nó ném lỗi (vd tên file có ký tự > 255) thì lượt
+  // tải đã bị trừ mà không hoàn lại -> mỗi lần 500 lại "đốt" 1 lượt, hết sạch quota.
   try {
     const original = await storage().getBuffer(grant.photo.originalKey);
-    buffer = await resizeForDelivery(original, grant.sizeLabel);
+    const buffer = await resizeForDelivery(original, grant.sizeLabel);
+
+    const ext = grant.photo.format === "png" ? "png" : "jpg";
+    // Tên đẹp giữ nguyên chữ Unicode (tiếng Việt) — dùng cho filename* (RFC 5987).
+    const prettyName = grant.photo.title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "picseo";
+    // Header HTTP chỉ nhận ByteString (Latin-1, 0-255). Ký tự > 255 (vd "Ỉ"=7848) sẽ
+    // ném lỗi khi dựng response -> phần filename= dự phòng phải rút về ASCII thuần.
+    const asciiName =
+      prettyName
+        .normalize("NFKD")
+        .replace(/[̀-ͯ]/g, "") // bỏ dấu thanh/dấu phụ sau khi tách
+        .replace(/[^a-zA-Z0-9._-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 60) || "picseo";
+    const filename = `${prettyName}-${grant.sizeLabel}.${ext}`;
+    const asciiFilename = `${asciiName}-${grant.sizeLabel}.${ext}`;
+
+    return new NextResponse(new Uint8Array(buffer), {
+      headers: {
+        "Content-Type": grant.photo.format === "png" ? "image/png" : "image/jpeg",
+        // filename= cho client cũ (ASCII), filename*= cho UTF-8 (browser hiện đại ưu tiên).
+        "Content-Disposition": `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        "Cache-Control": "no-store",
+      },
+    });
   } catch {
-    // Trả lại lượt đã giành nếu không phát được file.
+    // Trả lại lượt đã giành nếu không phát được file vì bất kỳ lý do gì.
     await prisma.downloadGrant.update({
       where: { id: grant.id },
       data: { downloadCount: { decrement: 1 } },
     });
     return new NextResponse("Không thể truy xuất file.", { status: 500 });
   }
-
-  const ext = grant.photo.format === "png" ? "png" : "jpg";
-  // Tên đẹp giữ nguyên chữ Unicode (tiếng Việt) — dùng cho filename* (RFC 5987).
-  const prettyName = grant.photo.title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "picseo";
-  // Header HTTP chỉ nhận ByteString (Latin-1, 0-255). Ký tự > 255 (vd "Ỉ"=7848) sẽ
-  // ném lỗi khi dựng response -> phần filename= dự phòng phải rút về ASCII thuần.
-  const asciiName =
-    prettyName
-      .normalize("NFKD")
-      .replace(/[̀-ͯ]/g, "") // bỏ dấu thanh/dấu phụ sau khi tách
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 60) || "picseo";
-  const filename = `${prettyName}-${grant.sizeLabel}.${ext}`;
-  const asciiFilename = `${asciiName}-${grant.sizeLabel}.${ext}`;
-
-  return new NextResponse(new Uint8Array(buffer), {
-    headers: {
-      "Content-Type": grant.photo.format === "png" ? "image/png" : "image/jpeg",
-      // filename= cho client cũ (ASCII), filename*= cho UTF-8 (browser hiện đại ưu tiên).
-      "Content-Disposition": `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-      "Cache-Control": "no-store",
-    },
-  });
 }
