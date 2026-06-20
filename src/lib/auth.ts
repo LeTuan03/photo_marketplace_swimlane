@@ -1,5 +1,6 @@
 import "server-only";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { SignJWT, jwtVerify } from "jose";
 import { env } from "./env";
 import { prisma } from "./prisma";
@@ -80,12 +81,16 @@ export async function getCurrentUser() {
 
 export async function requireUser() {
   const user = await getCurrentUser();
-  if (!user) throw new Error("UNAUTHENTICATED");
+  // Chưa đăng nhập (hoặc bị khóa) -> chuyển hướng đăng nhập thay vì ném lỗi 500.
+  // redirect() ném NEXT_REDIRECT (được Next xử lý), nên dòng dưới chỉ chạy khi đã xác thực.
+  if (!user) redirect("/login");
   return user;
 }
 
 export async function requireRole(...roles: Role[]) {
   const user = await requireUser();
-  if (!roles.includes(user.role)) throw new Error("FORBIDDEN");
+  // Sai vai trò -> về trang chủ (middleware đã chặn ở biên cho /admin, /seller;
+  // đây là lớp phòng vệ cho mọi trang gọi requireRole).
+  if (!roles.includes(user.role)) redirect("/");
   return user;
 }

@@ -30,7 +30,12 @@ export async function subscribeAction(formData: FormData) {
 
   if (plan === "FREE") {
     await prisma.$transaction(async (tx) => {
-      await tx.subscription.updateMany({ where: { userId: user.id, status: "ACTIVE" }, data: { status: "CANCELLED" } });
+      // Hủy cả sub ACTIVE lẫn PENDING: nếu chỉ hủy ACTIVE, một sub PENDING (đã bấm mua
+      // chưa trả tiền) có thể bị webhook kích hoạt MUỘN -> tự nâng cấp lại trái ý người dùng.
+      await tx.subscription.updateMany({
+        where: { userId: user.id, status: { in: ["ACTIVE", "PENDING"] } },
+        data: { status: "CANCELLED" },
+      });
       await tx.user.update({ where: { id: user.id }, data: { planType: "FREE", planRenewsAt: null } });
     });
     redirect("/subscription?downgraded=1");

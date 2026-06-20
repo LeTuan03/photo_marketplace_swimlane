@@ -33,8 +33,10 @@ export async function updatePlatformSettingsAction(formData: FormData) {
   entries["plan.PRO.price"] = String(Math.max(0, intField(formData, "plan_PRO_price")));
   entries["plan.PRO.quota"] = String(Math.max(0, intField(formData, "plan_PRO_quota")));
   entries["plan.UNLIMITED.price"] = String(Math.max(0, intField(formData, "plan_UNLIMITED_price")));
-  // -1 = không giới hạn
-  entries["plan.UNLIMITED.quota"] = String(intField(formData, "plan_UNLIMITED_quota", -1));
+  // -1 = không giới hạn. Chuẩn hoá: nhập trống/0/âm -> -1 (gói UNLIMITED phải là vô hạn).
+  // Nếu lưu "0", planQuotaFor sẽ coi như 0 lượt -> người dùng trả tiền KHÔNG tải được gì.
+  const unlimitedQuota = intField(formData, "plan_UNLIMITED_quota", -1);
+  entries["plan.UNLIMITED.quota"] = String(unlimitedQuota <= 0 ? -1 : unlimitedQuota);
 
   // AD2 giá license mặc định gợi ý
   for (const lt of LICENSE_ORDER) {
@@ -137,11 +139,16 @@ export async function rejectPhotoAction(formData: FormData) {
   redirect("/admin/review");
 }
 
+const KYC_STATUSES = new Set<KycStatus>(["NONE", "PENDING", "VERIFIED", "REJECTED"]);
+const SELLER_TIERS = new Set<SellerTier>(["NEW", "PRO", "ELITE"]);
+
 /** AD9: xác minh KYC người bán. */
 export async function setKycAction(formData: FormData) {
   await requireRole("ADMIN");
   const userId = String(formData.get("userId") ?? "");
   const status = String(formData.get("status") ?? "VERIFIED") as KycStatus;
+  // Validate enum: form ẩn bị sửa sẽ cho Prisma ném 500; chặn sớm về trang.
+  if (!userId || !KYC_STATUSES.has(status)) redirect("/admin/users");
   await prisma.user.update({ where: { id: userId }, data: { kycStatus: status } });
   revalidatePath("/admin/users");
   redirect("/admin/users");
@@ -162,6 +169,7 @@ export async function setTierAction(formData: FormData) {
   await requireRole("ADMIN");
   const userId = String(formData.get("userId") ?? "");
   const tier = String(formData.get("tier") ?? "NEW") as SellerTier;
+  if (!userId || !SELLER_TIERS.has(tier)) redirect("/admin/users");
   await prisma.user.update({ where: { id: userId }, data: { sellerTier: tier } });
   revalidatePath("/admin/users");
   redirect("/admin/users");
@@ -172,13 +180,16 @@ export async function resolveDisputeAction(formData: FormData) {
   await requireRole("ADMIN");
   const disputeId = String(formData.get("disputeId") ?? "");
   const decision = String(formData.get("decision") ?? "");
-  const orderItemId = String(formData.get("orderItemId") ?? "");
+  const formItemId = String(formData.get("orderItemId") ?? "");
   const percent = Math.min(100, Math.max(1, parseInt(String(formData.get("percent") ?? "100"), 10) || 100));
 
   const dispute = await prisma.dispute.findUnique({ where: { id: disputeId } });
   // Chỉ xử lý tranh chấp còn MỞ -> chống replay (double-submit / bấm 2 lần) gây
   // claw-back nhiều lần, +penaltyPoint nhiều lần, gỡ ảnh lặp lại.
   if (!dispute || dispute.status !== "OPEN") redirect("/admin/disputes");
+
+  // Ưu tiên item đã gắn chính xác lúc tạo tranh chấp; fallback item suy đoán từ trang.
+  const orderItemId = dispute!.orderItemId ?? formItemId;
 
   if (decision === "refund") {
     if (orderItemId) await refundOrderItem(orderItemId, dispute!.reason, percent);
@@ -196,6 +207,13 @@ export async function resolveDisputeAction(formData: FormData) {
       data: { status: "RESOLVED_REFUND", resolution: "Đã hoàn tiền cho người mua", resolvedAt: new Date() },
     });
   } else {
+    // Bác bỏ -> MỞ BĂNG escrow đã đóng băng (nếu có) để giải ngân bình thường.
+    if (orderItemId) {
+      await prisma.escrowHold.updateMany({
+        where: { orderItemId, status: "FROZEN" },
+        data: { status: "HELD" },
+      });
+    }
     await prisma.dispute.update({
       where: { id: disputeId },
       data: { status: "RESOLVED_REJECT", resolution: "Bác bỏ khiếu nại", resolvedAt: new Date() },
@@ -235,8 +253,13 @@ export async function confirmBankPaymentAction(formData: FormData) {
     const sub = await prisma.subscription.findUnique({ where: { id } });
     if (sub && sub.status === "PENDING") await activateSubscription(sub.id, txnId);
   } else {
-    const order = await prisma.order.findUnique({ where: { id } });
-    if (order && order.status === "PENDING") await fulfillPaidOrder(order.id, txnId);
+    // CHỈ xác nhận thủ công đơn dùng cổng chuyển khoản (BANKQR). Trước đây fetch theo
+    // id + status PENDING nên admin có thể "đã nhận tiền" cho đơn VNPay/MoMo CHƯA trả
+    // qua cổng -> fulfill khống không có tiền. id đến từ form ẩn nên phải khóa provider.
+    const order = await prisma.order.findFirst({
+      where: { id, status: "PENDING", paymentProvider: "BANKQR" },
+    });
+    if (order) await fulfillPaidOrder(order.id, txnId);
   }
   revalidatePath("/admin/payments");
   redirect("/admin/payments");

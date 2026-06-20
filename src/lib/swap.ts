@@ -62,9 +62,11 @@ export async function completeSwap(offerId: string): Promise<void> {
     await tx.downloadGrant.create({ data: makeGrant(offer.initiatorId, offer.requestedPhotoId, offer.id) });
     await tx.downloadGrant.create({ data: makeGrant(offer.responderId, offer.offeredPhotoId, offer.id) });
 
-    // mở khóa 2 ảnh trở lại LIVE
+    // mở khóa 2 ảnh trở lại LIVE — CHỈ ảnh đang LOCKED. Nếu trong lúc swap một ảnh
+    // bị chuyển DMCA_HOLD/REMOVED thì không "hồi sinh" nó về LIVE (grant vẫn cấp,
+    // nhưng /api/download chặn tải ảnh DMCA_HOLD/REMOVED).
     await tx.photo.updateMany({
-      where: { id: { in: [offer.offeredPhotoId, offer.requestedPhotoId] } },
+      where: { id: { in: [offer.offeredPhotoId, offer.requestedPhotoId] }, status: "LOCKED" },
       data: { status: "LIVE" },
     });
     return true;
@@ -98,16 +100,28 @@ export async function expireStaleSwaps(): Promise<number> {
   const stale = await prisma.swapOffer.findMany({
     where: { status: "PENDING", expiresAt: { lte: new Date() } },
   });
+  let count = 0;
   for (const s of stale) {
-    await prisma.swapOffer.update({ where: { id: s.id }, data: { status: "EXPIRED" } });
-    await notify({
-      userId: s.initiatorId,
-      type: "SWAP_DECLINED",
-      title: "Đề nghị trao đổi hết hạn",
-      body: "Đề nghị trao đổi của bạn đã hết hạn (48h). Bạn có thể gửi lại hoặc mua thẳng.",
-      link: "/swap",
-      email: false,
-    });
+    // Mỗi đề nghị xử lý độc lập + "giành" PENDING -> EXPIRED nguyên tử (chống đua với
+    // accept/decline xảy ra cùng lúc); lỗi 1 dòng không làm hỏng cả vòng cron.
+    try {
+      const c = await prisma.swapOffer.updateMany({
+        where: { id: s.id, status: "PENDING" },
+        data: { status: "EXPIRED" },
+      });
+      if (c.count === 0) continue;
+      count++;
+      await notify({
+        userId: s.initiatorId,
+        type: "SWAP_DECLINED",
+        title: "Đề nghị trao đổi hết hạn",
+        body: "Đề nghị trao đổi của bạn đã hết hạn (48h). Bạn có thể gửi lại hoặc mua thẳng.",
+        link: "/swap",
+        email: false,
+      });
+    } catch (err) {
+      console.error("expireStaleSwaps error:", err);
+    }
   }
-  return stale.length;
+  return count;
 }

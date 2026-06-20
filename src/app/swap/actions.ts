@@ -71,16 +71,20 @@ export async function respondSwapAction(formData: FormData) {
   const offer = await prisma.swapOffer.findUnique({ where: { id: offerId } });
   if (!offer || offer.responderId !== user.id || offer.status !== "PENDING") redirect("/swap");
 
+  const pair = [offer!.offeredPhotoId, offer!.requestedPhotoId];
+
   if (offer!.expiresAt <= new Date()) {
-    await prisma.swapOffer.update({ where: { id: offerId }, data: { status: "EXPIRED" } });
+    await prisma.swapOffer.updateMany({ where: { id: offerId, status: "PENDING" }, data: { status: "EXPIRED" } });
     redirect("/swap?error=Đề nghị đã hết hạn");
   }
 
   if (decision === "decline") {
-    await prisma.swapOffer.update({
-      where: { id: offerId },
+    // Chuyển PENDING -> DECLINED NGUYÊN TỬ: nếu luồng khác vừa accept/expire thì count===0.
+    const c = await prisma.swapOffer.updateMany({
+      where: { id: offerId, status: "PENDING" },
       data: { status: "DECLINED", respondedAt: new Date() },
     });
+    if (c.count === 0) redirect("/swap");
     await notify({
       userId: offer!.initiatorId,
       type: "SWAP_DECLINED",
@@ -93,38 +97,42 @@ export async function respondSwapAction(formData: FormData) {
     redirect("/swap");
   }
 
-  // Accept: kiểm tra 2 ảnh còn LIVE rồi khóa (SW3)
-  const photos = await prisma.photo.findMany({
-    where: { id: { in: [offer!.offeredPhotoId, offer!.requestedPhotoId] } },
-    select: { id: true, status: true },
-  });
-  if (photos.some((p) => p.status !== "LIVE")) {
-    await prisma.swapOffer.update({ where: { id: offerId }, data: { status: "DECLINED", respondedAt: new Date() } });
-    redirect("/swap?error=Một trong hai ảnh không còn khả dụng");
-  }
-
-  await prisma.$transaction(async (tx) => {
-    await tx.photo.updateMany({
-      where: { id: { in: [offer!.offeredPhotoId, offer!.requestedPhotoId] } },
-      data: { status: "LOCKED" },
-    });
-    await tx.swapOffer.update({
-      where: { id: offerId },
+  // Accept: "giành" đề nghị (PENDING -> ACCEPTED) rồi khóa 2 ảnh CHỈ khi cả hai còn LIVE.
+  // Tất cả trong 1 transaction nguyên tử: nếu không khóa đủ 2 ảnh (một ảnh đã bán/khóa/
+  // gỡ) thì ném lỗi để rollback toàn bộ -> không có chuyện đề nghị ACCEPTED mà ảnh chưa khóa.
+  const ok = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.swapOffer.updateMany({
+      where: { id: offerId, status: "PENDING" },
       data: { status: "ACCEPTED", respondedAt: new Date() },
     });
+    if (claimed.count === 0) return false; // luồng khác đã xử lý
+
+    const locked = await tx.photo.updateMany({
+      where: { id: { in: pair }, status: "LIVE" },
+      data: { status: "LOCKED" },
+    });
+    if (locked.count !== 2) throw new Error("PHOTO_UNAVAILABLE"); // rollback
+
     // hủy các đề nghị PENDING khác liên quan tới 2 ảnh này
     await tx.swapOffer.updateMany({
       where: {
         id: { not: offerId },
         status: "PENDING",
         OR: [
-          { offeredPhotoId: { in: [offer!.offeredPhotoId, offer!.requestedPhotoId] } },
-          { requestedPhotoId: { in: [offer!.offeredPhotoId, offer!.requestedPhotoId] } },
+          { offeredPhotoId: { in: pair } },
+          { requestedPhotoId: { in: pair } },
         ],
       },
       data: { status: "DECLINED" },
     });
+    return true;
+  }).catch((e) => {
+    if (e instanceof Error && e.message === "PHOTO_UNAVAILABLE") return "unavailable" as const;
+    throw e;
   });
+
+  if (ok === false) redirect("/swap");
+  if (ok === "unavailable") redirect("/swap?error=Một trong hai ảnh không còn khả dụng");
 
   await notify({
     userId: offer!.initiatorId,

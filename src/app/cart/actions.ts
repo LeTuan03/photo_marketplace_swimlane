@@ -104,8 +104,21 @@ export async function reportPhotoAction(formData: FormData) {
     redirect("/?dmca=1");
   }
 
-  await prisma.dispute.create({
-    data: { photoId, raisedById: user!.id, reason, detail, status: "OPEN" },
+  // Gắn đúng giao dịch của người báo cáo (nếu họ đã mua ảnh này) và ĐÓNG BĂNG escrow:
+  // cron `releaseDueEscrows` chỉ giải ngân escrow HELD, nên FROZEN sẽ được giữ lại
+  // tới khi admin xử lý -> tránh giải ngân cho người bán rồi phải claw-back âm khi hoàn.
+  const myItem = await prisma.orderItem.findFirst({
+    where: { photoId, order: { buyerId: user!.id, status: "PAID" } },
+    orderBy: { createdAt: "desc" },
+    include: { escrow: true },
+  });
+  await prisma.$transaction(async (tx) => {
+    await tx.dispute.create({
+      data: { photoId, orderItemId: myItem?.id ?? null, raisedById: user!.id, reason, detail, status: "OPEN" },
+    });
+    if (myItem?.escrow && myItem.escrow.status === "HELD") {
+      await tx.escrowHold.update({ where: { id: myItem.escrow.id }, data: { status: "FROZEN" } });
+    }
   });
   await notifyAdmins(
     "Có báo cáo mới về ảnh",

@@ -52,7 +52,12 @@ export async function GET(req: NextRequest) {
     const original = await storage().getBuffer(grant.photo.originalKey);
     const buffer = await resizeForDelivery(original, grant.sizeLabel);
 
-    const ext = grant.photo.format === "png" ? "png" : "jpg";
+    // ext/MIME phải khớp ĐÚNG định dạng gốc. resizeForDelivery giữ nguyên định dạng
+    // đầu vào (không ép encode), nên ảnh webp tải về phải gắn .webp + image/webp —
+    // trước đây mọi định dạng != png đều bị gán .jpg/image/jpeg -> file webp hỏng.
+    const fmt = grant.photo.format;
+    const ext = fmt === "png" ? "png" : fmt === "webp" ? "webp" : "jpg";
+    const mime = fmt === "png" ? "image/png" : fmt === "webp" ? "image/webp" : "image/jpeg";
     // Tên đẹp giữ nguyên chữ Unicode (tiếng Việt) — dùng cho filename* (RFC 5987).
     const prettyName = grant.photo.title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "picseo";
     // Header HTTP chỉ nhận ByteString (Latin-1, 0-255). Ký tự > 255 (vd "Ỉ"=7848) sẽ
@@ -69,7 +74,7 @@ export async function GET(req: NextRequest) {
 
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
-        "Content-Type": grant.photo.format === "png" ? "image/png" : "image/jpeg",
+        "Content-Type": mime,
         // filename= cho client cũ (ASCII), filename*= cho UTF-8 (browser hiện đại ưu tiên).
         "Content-Disposition": `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
         "Cache-Control": "no-store",

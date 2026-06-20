@@ -3,7 +3,9 @@ import { z } from "zod";
 export const registerSchema = z.object({
   name: z.string().min(2, "Tên tối thiểu 2 ký tự").max(80),
   email: z.string().email("Email không hợp lệ"),
-  password: z.string().min(6, "Mật khẩu tối thiểu 6 ký tự").max(100),
+  // bcrypt chỉ băm 72 byte đầu (cắt âm thầm) -> giới hạn 72 để tránh hai mật khẩu dài
+  // khác nhau nhưng trùng 72 byte đầu lại đăng nhập được cho nhau.
+  password: z.string().min(6, "Mật khẩu tối thiểu 6 ký tự").max(72, "Mật khẩu tối đa 72 ký tự"),
   role: z.enum(["BUYER", "SELLER"]).default("BUYER"),
 });
 
@@ -39,8 +41,10 @@ export const payoutSchema = z.object({
  */
 export function safeInternalPath(next: unknown, fallback = "/"): string {
   const s = typeof next === "string" ? next : "";
+  // Phải là path nội bộ tuyệt đối: bắt đầu bằng đúng 1 dấu "/", KHÔNG "//" (protocol-
+  // relative) và KHÔNG chứa "\" (một số trình duyệt quy "\" thành "/", thành URL ngoài).
   if (!s.startsWith("/")) return fallback;
-  if (s.startsWith("//") || s.startsWith("/\\")) return fallback;
+  if (s.startsWith("//") || s.includes("\\")) return fallback;
   return s;
 }
 

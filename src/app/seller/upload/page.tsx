@@ -28,7 +28,7 @@ export default async function UploadPage({
       <form action={uploadPhotoAction} className="grid gap-6 lg:grid-cols-2">
         <div className="card space-y-4 p-5">
           <div>
-            <label className="label">File ảnh (JPG/PNG/WEBP, tối đa 50MB/ảnh — chọn nhiều để tải hàng loạt, tối đa 10)</label>
+            <label className="label">File ảnh (JPG/PNG/WEBP, tối đa 50MB/ảnh, tổng mỗi lần ≤ 100MB — chọn nhiều để tải hàng loạt, tối đa 10)</label>
             <input name="file" type="file" accept="image/jpeg,image/png,image/webp" multiple required className="input" />
           </div>
           <div>

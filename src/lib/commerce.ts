@@ -145,14 +145,20 @@ export async function releaseDueEscrows(): Promise<number> {
 
     if (!released) continue; // đã được luồng khác giải ngân -> không notify/đếm trùng
 
-    await notify({
-      userId: e.sellerId,
-      type: "PAYOUT_RELEASED",
-      title: "Tiền đã được giải ngân",
-      body: `${formatVnd(e.amountVnd)} đã được giải ngân vào số dư rút được của bạn.`,
-      link: "/seller/earnings",
-      email: true,
-    });
+    // notify là best-effort: lỗi gửi/ghi thông báo KHÔNG được làm hỏng cả vòng cron
+    // (tiền đã giải ngân an toàn trong transaction ở trên).
+    try {
+      await notify({
+        userId: e.sellerId,
+        type: "PAYOUT_RELEASED",
+        title: "Tiền đã được giải ngân",
+        body: `${formatVnd(e.amountVnd)} đã được giải ngân vào số dư rút được của bạn.`,
+        link: "/seller/earnings",
+        email: true,
+      });
+    } catch (err) {
+      console.error("releaseDueEscrows notify error:", err);
+    }
     count++;
   }
   return count;
@@ -177,40 +183,65 @@ export async function refundOrderItem(orderItemId: string, reason: string, perce
   const sellerKeep = Math.round((item.sellerEarningVnd * (100 - pct)) / 100);
   const clawback = item.sellerEarningVnd - sellerKeep;
 
-  await prisma.$transaction(async (tx) => {
+  // Trả về false nếu KHÔNG có gì để hoàn (đã hoàn trước đó) -> không bắn thông báo trùng.
+  const applied = await prisma.$transaction(async (tx) => {
     if (item.escrow) {
-      if (item.escrow.status === "HELD") {
+      const st = item.escrow.status;
+      // HELD hoặc FROZEN (đóng băng do tranh chấp) -> tiền vẫn trong escrow.
+      if (st === "HELD" || st === "FROZEN") {
         if (full) {
-          await tx.escrowHold.update({ where: { id: item.escrow.id }, data: { status: "REFUNDED" } });
+          const c = await tx.escrowHold.updateMany({
+            where: { id: item.escrow.id, status: { in: ["HELD", "FROZEN"] } },
+            data: { status: "REFUNDED" },
+          });
+          if (c.count === 0) return false; // luồng khác đã hoàn
         } else {
-          await tx.escrowHold.update({ where: { id: item.escrow.id }, data: { amountVnd: sellerKeep } });
+          // Hoàn một phần: giảm phần escrow xuống đúng phần người bán được giữ,
+          // mở băng về HELD để giải ngân bình thường phần còn lại.
+          const c = await tx.escrowHold.updateMany({
+            where: { id: item.escrow.id, status: { in: ["HELD", "FROZEN"] } },
+            data: { amountVnd: sellerKeep, status: "HELD" },
+          });
+          if (c.count === 0) return false;
         }
-      } else if (item.escrow.status === "RELEASED" && clawback > 0) {
-        // Người bán đã nhận tiền -> trừ lại TOÀN BỘ phần hoàn (nguyên tử).
-        // Trước đây trừ tối đa = số dư hiện có (Math.min) nên seller chỉ cần rút
-        // tiền ngay sau giải ngân là thoát claw-back, platform mất trắng. Nay trừ
-        // đủ clawback (cho phép số dư âm = ghi nợ); payout đã chặn rút khi âm.
-        const u = await tx.user.update({
-          where: { id: item.sellerId },
-          data: { balanceVnd: { decrement: clawback } },
-          select: { balanceVnd: true },
-        });
-        await tx.walletTransaction.create({
-          data: {
-            userId: item.sellerId,
-            type: "REFUND_ADJUST",
-            amountVnd: -clawback,
-            balanceAfterVnd: u.balanceVnd,
-            ref: item.id,
-            note: `Trừ lại do hoàn ${pct}% cho người mua`,
-          },
-        });
+      } else if (st === "RELEASED") {
+        if (clawback > 0) {
+          // Người bán đã nhận tiền -> "giành" RELEASED -> REFUNDED NGUYÊN TỬ rồi mới trừ.
+          // Chống claw-back nhiều lần khi có >1 đường resolve cùng một item. Trừ đủ
+          // clawback (cho phép số dư âm = ghi nợ); payout đã chặn rút khi âm.
+          const c = await tx.escrowHold.updateMany({
+            where: { id: item.escrow.id, status: "RELEASED" },
+            data: { status: "REFUNDED" },
+          });
+          if (c.count === 0) return false; // đã claw back rồi
+          const u = await tx.user.update({
+            where: { id: item.sellerId },
+            data: { balanceVnd: { decrement: clawback } },
+            select: { balanceVnd: true },
+          });
+          await tx.walletTransaction.create({
+            data: {
+              userId: item.sellerId,
+              type: "REFUND_ADJUST",
+              amountVnd: -clawback,
+              balanceAfterVnd: u.balanceVnd,
+              ref: item.id,
+              note: `Trừ lại do hoàn ${pct}% cho người mua`,
+            },
+          });
+        }
+      } else {
+        // escrow đã ở trạng thái cuối (REFUNDED) -> không hoàn lại lần nữa.
+        return false;
       }
     }
     if (full) {
       await tx.downloadGrant.updateMany({ where: { orderItemId: item.id }, data: { maxDownloads: 0 } });
     }
+    return true;
   });
+
+  if (!applied) return;
 
   await notify({
     userId: item.order.buyerId,

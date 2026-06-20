@@ -54,7 +54,12 @@ export async function restoreDmcaClaim(claimId: string, resolution: string): Pro
       where: { id: claim.id },
       data: { status: "RESOLVED_RESTORED", resolvedAt: new Date(), resolution },
     });
-    await tx.photo.update({ where: { id: claim.photoId }, data: { status: "LIVE" } });
+    // CHỈ khôi phục về LIVE khi ảnh đang ở DMCA_HOLD. Tránh "hồi sinh" ảnh đã bị
+    // REMOVED do nguyên nhân khác, hoặc ghi đè trạng thái LOCKED (đang trong swap).
+    await tx.photo.updateMany({
+      where: { id: claim.photoId, status: "DMCA_HOLD" },
+      data: { status: "LIVE" },
+    });
   });
 
   await notify({
@@ -80,8 +85,15 @@ export async function expireDueDmca(): Promise<number> {
     where: { status: "OPEN", deadline: { lte: new Date() } },
     select: { id: true },
   });
+  let count = 0;
   for (const c of due) {
-    await upholdDmcaClaim(c.id, "Hết 7 ngày không có phản biện.");
+    // Mỗi claim độc lập: lỗi 1 dòng không làm hỏng cả vòng cron bảo trì.
+    try {
+      await upholdDmcaClaim(c.id, "Hết 7 ngày không có phản biện.");
+      count++;
+    } catch (err) {
+      console.error("expireDueDmca error:", err);
+    }
   }
-  return due.length;
+  return count;
 }

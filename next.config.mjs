@@ -8,10 +8,12 @@ const nextConfig = {
       { protocol: "https", hostname: "**" },
     ],
   },
-  // Cho phép body lớn khi upload ảnh qua Server Actions
+  // Cho phép body lớn khi upload ảnh qua Server Actions. Đây là giới hạn TỔNG của cả
+  // request (cả batch), không phải mỗi ảnh — Next chặn ở tầng framework trước khi action
+  // chạy, nên không báo lỗi mềm được. Đặt đủ cho 1 batch ảnh thực tế (~100MB tổng).
   experimental: {
     serverActions: {
-      bodySizeLimit: "55mb",
+      bodySizeLimit: "110mb",
     },
   },
 };

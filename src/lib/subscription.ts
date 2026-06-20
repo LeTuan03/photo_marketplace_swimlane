@@ -30,18 +30,17 @@ export function canDownloadViaPlan(user: User, limitOverride?: number): boolean 
 
 /** Reset quota theo chu kỳ nếu đã qua mốc. Trả về user mới nhất. */
 export async function ensureFreshQuota(user: User): Promise<User> {
-  if (user.quotaResetAt && user.quotaResetAt <= new Date()) {
+  // CHỈ reset khi gói còn hiệu lực. Trước đây reset bất kể trạng thái -> một user đã
+  // hết hạn (chưa kịp bị cron hạ về FREE) được cấp lại nguyên quota và hiển thị mốc
+  // reset sai. Gói hết hạn sẽ do expireDueSubscriptions hạ về FREE.
+  const active = user.planType !== "FREE" && !!user.planRenewsAt && user.planRenewsAt > new Date();
+  if (active && user.quotaResetAt && user.quotaResetAt <= new Date()) {
     return prisma.user.update({
       where: { id: user.id },
       data: { quotaUsed: 0, quotaResetAt: new Date(Date.now() + PERIOD_MS) },
     });
   }
   return user;
-}
-
-/** Tăng số lượt đã dùng (cho gói PRO; UNLIMITED vẫn đếm để thống kê). */
-export async function consumeQuota(userId: string): Promise<void> {
-  await prisma.user.update({ where: { id: userId }, data: { quotaUsed: { increment: 1 } } });
 }
 
 /** B7 + TT3: kích hoạt subscription sau khi thanh toán thành công. Idempotent. */
@@ -97,22 +96,29 @@ export async function expireDueSubscriptions(): Promise<number> {
   const due = await prisma.subscription.findMany({
     where: { status: "ACTIVE", currentPeriodEnd: { lte: new Date() } },
   });
+  let count = 0;
   for (const s of due) {
-    await prisma.$transaction(async (tx) => {
-      await tx.subscription.update({ where: { id: s.id }, data: { status: "EXPIRED" } });
-      await tx.user.update({
-        where: { id: s.userId },
-        data: { planType: "FREE", planRenewsAt: null },
+    // Mỗi gói xử lý độc lập: lỗi 1 dòng không làm hỏng cả vòng cron bảo trì.
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.subscription.update({ where: { id: s.id }, data: { status: "EXPIRED" } });
+        await tx.user.update({
+          where: { id: s.userId },
+          data: { planType: "FREE", planRenewsAt: null },
+        });
       });
-    });
-    await notify({
-      userId: s.userId,
-      type: "GENERIC",
-      title: "Gói đã hết hạn",
-      body: "Gói của bạn đã hết hạn và được hạ về Free. Đăng ký lại để tiếp tục tải theo quota.",
-      link: "/subscription",
-      email: true,
-    });
+      count++;
+      await notify({
+        userId: s.userId,
+        type: "GENERIC",
+        title: "Gói đã hết hạn",
+        body: "Gói của bạn đã hết hạn và được hạ về Free. Đăng ký lại để tiếp tục tải theo quota.",
+        link: "/subscription",
+        email: true,
+      });
+    } catch (err) {
+      console.error("expireDueSubscriptions error:", err);
+    }
   }
-  return due.length;
+  return count;
 }

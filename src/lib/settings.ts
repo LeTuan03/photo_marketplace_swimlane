@@ -23,7 +23,9 @@ const TTL_MS = 10_000;
 
 function num(map: Map<string, string>, key: string, fallback: number): number {
   const v = map.get(key);
-  if (v === undefined) return fallback;
+  // Coi chuỗi rỗng/khoảng trắng như THIẾU giá trị: Number("") === 0 (hữu hạn) nên
+  // nếu không chặn, một row value="" sẽ biến hoa hồng -> 0% và giá license/gói -> 0đ.
+  if (v === undefined || v.trim() === "") return fallback;
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
