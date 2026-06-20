@@ -11,6 +11,7 @@ import {
 } from "./actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Alert } from "@/components/ui";
+import { mockGatewayEnabled } from "@/lib/gateway";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export default async function MockPaymentPage({
 }) {
   const sp = await searchParams;
   const user = await requireUser();
+  if (!mockGatewayEnabled()) redirect("/cart?error=Cổng thanh toán giả lập đã bị vô hiệu");
 
   // Luồng subscription
   if (sp.sub) {

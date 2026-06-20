@@ -16,6 +16,12 @@ import type { LicenseType } from "@prisma/client";
 const MAX_BYTES = 50 * 1024 * 1024;
 const MAX_BATCH = 10;
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
+// Định dạng hợp lệ theo kết quả sniff của sharp (m.format) -> ext + content-type lưu trữ.
+const FORMAT_EXT: Record<string, { ext: string; mime: string }> = {
+  jpeg: { ext: "jpg", mime: "image/jpeg" },
+  png: { ext: "png", mime: "image/png" },
+  webp: { ext: "webp", mime: "image/webp" },
+};
 
 function collectLicenses(formData: FormData) {
   const out: { type: LicenseType; priceVnd: number }[] = [];
@@ -80,7 +86,15 @@ export async function uploadPhotoAction(formData: FormData) {
       skipped++;
       continue;
     }
-    const ext = f.type === "image/png" ? "png" : f.type === "image/webp" ? "webp" : "jpg";
+    // Xác định định dạng theo NỘI DUNG thật (sharp sniff) chứ không tin f.type do
+    // client khai báo. File khai png nhưng bytes là thứ khác sẽ bị loại.
+    const sniffed = FORMAT_EXT[imgMeta.format];
+    if (!sniffed) {
+      skipped++;
+      continue;
+    }
+    const ext = sniffed.ext;
+    const contentType = sniffed.mime;
 
     const photo = await prisma.photo.create({
       data: {
@@ -109,7 +123,7 @@ export async function uploadPhotoAction(formData: FormData) {
     try {
       const [preview, thumb] = await Promise.all([makeWatermarkedPreview(buffer), makeThumb(buffer)]);
       await Promise.all([
-        storage().put(oKey, buffer, f.type),
+        storage().put(oKey, buffer, contentType),
         storage().put(pKey, preview, "image/webp"),
         storage().put(tKey, thumb, "image/webp"),
       ]);
@@ -283,13 +297,17 @@ export async function requestPayoutAction(formData: FormData) {
     redirect("/seller/earnings?error=Cần xác minh danh tính (KYC) trước khi rút tiền");
   }
 
-  await prisma.$transaction(async (tx) => {
-    const fresh = await tx.user.findUnique({ where: { id: user.id } });
-    if (!fresh || fresh.balanceVnd < amountVnd) {
-      redirect("/seller/earnings?error=Số dư không đủ");
-    }
-    const after = fresh!.balanceVnd - amountVnd;
-    await tx.user.update({ where: { id: user.id }, data: { balanceVnd: after } });
+  // Trừ số dư NGUYÊN TỬ + có điều kiện (chống đua điều kiện rút vượt số dư):
+  // hai request song song không thể cùng đọc số dư cũ rồi cùng rút. updateMany
+  // chỉ thành công khi balanceVnd >= amountVnd tại thời điểm ghi.
+  const ok = await prisma.$transaction(async (tx) => {
+    const debit = await tx.user.updateMany({
+      where: { id: user.id, balanceVnd: { gte: amountVnd } },
+      data: { balanceVnd: { decrement: amountVnd } },
+    });
+    if (debit.count === 0) return false; // số dư không đủ (hoặc đã bị request khác trừ)
+
+    const fresh = await tx.user.findUnique({ where: { id: user.id }, select: { balanceVnd: true } });
     await tx.payout.create({
       data: { sellerId: user.id, amountVnd, method, destination, status: "REQUESTED" },
     });
@@ -298,11 +316,13 @@ export async function requestPayoutAction(formData: FormData) {
         userId: user.id,
         type: "PAYOUT",
         amountVnd: -amountVnd,
-        balanceAfterVnd: after,
+        balanceAfterVnd: fresh?.balanceVnd ?? 0,
         note: `Yêu cầu rút tiền qua ${method}`,
       },
     });
+    return true;
   });
 
+  if (!ok) redirect("/seller/earnings?error=Số dư không đủ");
   redirect("/seller/earnings?payout=1");
 }

@@ -52,6 +52,11 @@ export const SIZE_LABELS: Record<string, string> = {
   ORIGINAL: "Gốc (full)",
 };
 
+/** Chuẩn hoá size do client gửi: chỉ chấp nhận S/M/L/ORIGINAL, còn lại -> ORIGINAL. */
+export function validSizeLabel(label: string): string {
+  return label in SIZE_LABELS ? label : "ORIGINAL";
+}
+
 // --- Danh mục mặc định (AD1) ---
 export const DEFAULT_CATEGORIES = [
   { slug: "phong-canh", name: "Phong cảnh" },

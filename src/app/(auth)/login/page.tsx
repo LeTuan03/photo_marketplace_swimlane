@@ -50,10 +50,12 @@ export default async function LoginPage({
           </Link>
         </p>
 
-        <div className="mt-5 rounded-lg bg-gray-50 p-3 text-xs text-gray-500">
-          <p className="font-medium text-gray-600">Tài khoản demo (mật khẩu: password123):</p>
-          <p>admin@picseo.local · seller@picseo.local · buyer@picseo.local</p>
-        </div>
+        {process.env.NODE_ENV !== "production" && (
+          <div className="mt-5 rounded-lg bg-gray-50 p-3 text-xs text-gray-500">
+            <p className="font-medium text-gray-600">Tài khoản demo (mật khẩu: password123):</p>
+            <p>admin@picseo.local · seller@picseo.local · buyer@picseo.local</p>
+          </div>
+        )}
       </div>
     </div>
   );

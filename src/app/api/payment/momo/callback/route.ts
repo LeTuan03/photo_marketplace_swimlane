@@ -26,9 +26,7 @@ export async function GET(req: NextRequest) {
       await fulfillPaidOrder(order.id, query.transId);
       return result("success", order.id);
     }
-    if (order.status === "PENDING") {
-      await prisma.order.update({ where: { id: order.id }, data: { status: "FAILED" } });
-    }
+    // KHÔNG ghi FAILED từ return-URL (có thể bị replay). IPN mới được ghi FAILED.
     return result("failed", order.id);
   }
 

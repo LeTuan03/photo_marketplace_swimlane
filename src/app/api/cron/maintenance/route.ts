@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { env } from "@/lib/env";
+import { isValidCronSecret } from "@/lib/cron";
 import { releaseDueEscrows } from "@/lib/commerce";
 import { expireStaleSwaps } from "@/lib/swap";
 import { expireDueSubscriptions } from "@/lib/subscription";
@@ -11,11 +11,12 @@ import { expireDueDmca } from "@/lib/dmca";
  *  - Hết hạn đề nghị swap quá 48h (SW3b)
  *  - Hết hạn subscription -> hạ về Free (TT7)
  *  - Hết hạn 7 ngày khiếu nại DMCA không phản biện -> gỡ ảnh (S10b)
- * Bảo vệ bằng CRON_SECRET (query ?secret= hoặc header x-cron-secret).
+ * Bảo vệ bằng CRON_SECRET. Ưu tiên header `x-cron-secret` (không lọt vào log/referer
+ * như query-string); vẫn chấp nhận ?secret= để tương thích cron cũ. So sánh constant-time.
  */
 async function handle(req: NextRequest) {
-  const secret = req.nextUrl.searchParams.get("secret") ?? req.headers.get("x-cron-secret") ?? "";
-  if (secret !== env.cronSecret) {
+  const secret = req.headers.get("x-cron-secret") ?? req.nextUrl.searchParams.get("secret") ?? "";
+  if (!isValidCronSecret(secret)) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   const [escrowsReleased, swapsExpired, subsExpired, dmcaRemoved] = await Promise.all([

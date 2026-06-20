@@ -33,6 +33,17 @@ export const payoutSchema = z.object({
   destination: z.string().min(3, "Vui lòng nhập thông tin nhận tiền").max(200),
 });
 
+/**
+ * Chuẩn hoá redirect nội bộ -> chống open-redirect. Chỉ chấp nhận path bắt đầu
+ * bằng "/" và KHÔNG phải "//" hay "/\" (trình duyệt coi là URL ngoài, protocol-relative).
+ */
+export function safeInternalPath(next: unknown, fallback = "/"): string {
+  const s = typeof next === "string" ? next : "";
+  if (!s.startsWith("/")) return fallback;
+  if (s.startsWith("//") || s.startsWith("/\\")) return fallback;
+  return s;
+}
+
 export function parseTags(csv: string): string[] {
   return Array.from(
     new Set(

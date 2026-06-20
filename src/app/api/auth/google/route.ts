@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { googleConfigured, getAuthUrl } from "@/lib/google";
 import { randomToken } from "@/lib/utils";
+import { safeInternalPath } from "@/lib/validation";
 import { env } from "@/lib/env";
 
 /** Bắt đầu đăng nhập Google: tạo state (CSRF) + chuyển tới trang đồng ý. */
@@ -8,8 +9,7 @@ export async function GET(req: NextRequest) {
   if (!googleConfigured()) {
     return NextResponse.redirect(`${env.appUrl}/login?error=${encodeURIComponent("Chưa cấu hình đăng nhập Google")}`);
   }
-  const nextParam = req.nextUrl.searchParams.get("next") || "/";
-  const next = nextParam.startsWith("/") ? nextParam : "/";
+  const next = safeInternalPath(req.nextUrl.searchParams.get("next"));
   const state = randomToken(16);
 
   const res = NextResponse.redirect(getAuthUrl(state));

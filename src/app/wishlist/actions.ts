@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import { safeInternalPath } from "@/lib/validation";
 
 /** B12: thêm/bỏ ảnh khỏi wishlist (toggle). Lưu giá hiện tại để phát hiện giảm giá. */
 export async function toggleWishlistAction(formData: FormData) {
@@ -31,6 +32,7 @@ export async function toggleWishlistAction(formData: FormData) {
     }
   }
 
-  revalidatePath(next.startsWith("/") ? next : "/");
-  redirect(next.startsWith("/") ? next : "/");
+  const dest = safeInternalPath(next);
+  revalidatePath(dest);
+  redirect(dest);
 }

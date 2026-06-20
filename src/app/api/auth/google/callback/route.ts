@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { exchangeCode } from "@/lib/google";
 import { buildSessionCookie } from "@/lib/auth";
+import { safeInternalPath } from "@/lib/validation";
 import { env } from "@/lib/env";
 
 /** Google gọi lại sau khi người dùng đồng ý: đổi code -> hồ sơ -> tạo/đăng nhập user. */
@@ -15,8 +16,7 @@ export async function GET(req: NextRequest) {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const cookieState = req.cookies.get("g_oauth_state")?.value;
-  const nextRaw = req.cookies.get("g_oauth_next")?.value || "/";
-  const next = nextRaw.startsWith("/") ? nextRaw : "/";
+  const next = safeInternalPath(req.cookies.get("g_oauth_next")?.value);
 
   if (!code || !state || !cookieState || state !== cookieState) {
     return fail("Phiên đăng nhập Google không hợp lệ, vui lòng thử lại");
@@ -30,6 +30,10 @@ export async function GET(req: NextRequest) {
     return fail("Không xác thực được với Google");
   }
   if (!profile.email) return fail("Tài khoản Google không có email");
+  // Chỉ tạo/đăng nhập/liên kết khi Google đã xác minh email. Ngăn chiếm tài khoản:
+  // kẻ tấn công tạo Google account với email CHƯA xác minh trùng email nạn nhân để
+  // được auto-link vào tài khoản email-password sẵn có.
+  if (!profile.emailVerified) return fail("Email Google chưa được xác minh, không thể đăng nhập");
 
   let user = await prisma.user.findUnique({ where: { email: profile.email } });
   if (!user) {

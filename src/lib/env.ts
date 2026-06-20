@@ -84,3 +84,33 @@ export const env = {
 };
 
 export type Env = typeof env;
+
+// --- Bảo vệ production: từ chối chạy bằng secret mặc định/yếu ---------------
+// Các giá trị fallback dưới đây CHỈ an toàn cho dev. Nếu deploy production mà
+// quên đặt biến môi trường, app sẽ chạy bằng secret công khai trong repo ->
+// kẻ tấn công ký được JWT phiên (chiếm admin), token tải, và gọi cron.
+// Vì vậy fail-fast ngay khi khởi động (trừ lúc `next build` chưa có env thật).
+const DEV_DEFAULT_SECRETS = {
+  AUTH_SECRET: "dev-insecure-auth-secret-change-me",
+  DOWNLOAD_SECRET: "dev-insecure-download-secret-change-me",
+  CRON_SECRET: "dev-cron-secret",
+};
+
+const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
+if (env.isProd && !isBuildPhase) {
+  const problems: string[] = [];
+  const needStrong = (name: keyof typeof DEV_DEFAULT_SECRETS, value: string, minLen = 32) => {
+    if (!process.env[name] || value === DEV_DEFAULT_SECRETS[name] || value.length < minLen) {
+      problems.push(`${name} (đặt chuỗi ngẫu nhiên >= ${minLen} ký tự)`);
+    }
+  };
+  needStrong("AUTH_SECRET", env.authSecret);
+  needStrong("DOWNLOAD_SECRET", env.downloadSecret);
+  needStrong("CRON_SECRET", env.cronSecret, 16);
+  if (problems.length) {
+    throw new Error(
+      `[env] Secret không an toàn ở production: ${problems.join("; ")}. ` +
+        `Hãy đặt các biến môi trường này trước khi chạy.`,
+    );
+  }
+}

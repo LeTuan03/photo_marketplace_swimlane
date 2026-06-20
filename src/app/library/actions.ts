@@ -16,6 +16,6 @@ export async function requestDownloadAction(formData: FormData) {
     redirect("/library?error=Đã hết lượt tải cho ảnh này");
   }
 
-  const token = await signDownloadToken(grant!.id);
+  const token = await signDownloadToken(grant!.id, user.id);
   redirect(`/api/download?token=${encodeURIComponent(token)}`);
 }

@@ -5,6 +5,12 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { fulfillPaidOrder } from "@/lib/commerce";
 import { activateSubscription } from "@/lib/subscription";
+import { mockGatewayEnabled } from "@/lib/gateway";
+
+/** Chặn cổng giả lập khi đã có cổng thật / ở production (chống bypass thanh toán). */
+function assertMockEnabled() {
+  if (!mockGatewayEnabled()) redirect("/cart?error=Cổng thanh toán giả lập đã bị vô hiệu");
+}
 
 async function loadOwnPendingOrder(orderId: string) {
   const user = await requireUser();
@@ -14,6 +20,7 @@ async function loadOwnPendingOrder(orderId: string) {
 }
 
 export async function mockPaySuccessAction(formData: FormData) {
+  assertMockEnabled();
   const orderId = String(formData.get("orderId") ?? "");
   const order = await loadOwnPendingOrder(orderId);
   if (order.status === "PENDING") {
@@ -23,6 +30,7 @@ export async function mockPaySuccessAction(formData: FormData) {
 }
 
 export async function mockPayFailAction(formData: FormData) {
+  assertMockEnabled();
   const orderId = String(formData.get("orderId") ?? "");
   const order = await loadOwnPendingOrder(orderId);
   if (order.status === "PENDING") {
@@ -32,6 +40,7 @@ export async function mockPayFailAction(formData: FormData) {
 }
 
 export async function mockSubSuccessAction(formData: FormData) {
+  assertMockEnabled();
   const user = await requireUser();
   const subId = String(formData.get("subId") ?? "");
   const sub = await prisma.subscription.findUnique({ where: { id: subId } });
@@ -41,6 +50,7 @@ export async function mockSubSuccessAction(formData: FormData) {
 }
 
 export async function mockSubFailAction(formData: FormData) {
+  assertMockEnabled();
   const user = await requireUser();
   const subId = String(formData.get("subId") ?? "");
   const sub = await prisma.subscription.findUnique({ where: { id: subId } });

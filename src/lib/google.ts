@@ -1,5 +1,11 @@
 import "server-only";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { env } from "./env";
+
+// Bộ khoá công khai của Google để verify CHỮ KÝ id_token (RS256). Cache nội bộ.
+const GOOGLE_JWKS = createRemoteJWKSet(
+  new URL("https://www.googleapis.com/oauth2/v3/certs"),
+);
 
 /**
  * Google OAuth 2.0 — luồng authorization code cho web server (có client secret).
@@ -36,23 +42,26 @@ export type GoogleProfile = {
   picture?: string;
 };
 
-function decodeIdToken(idToken: string): GoogleProfile {
-  // id_token đến trực tiếp từ endpoint token của Google qua TLS -> tin cậy payload.
-  const payloadB64 = idToken.split(".")[1];
-  const json = Buffer.from(payloadB64, "base64").toString("utf-8");
-  const p = JSON.parse(json) as {
-    sub: string;
-    email: string;
-    email_verified?: boolean | string;
-    name?: string;
-    picture?: string;
-  };
+async function verifyIdToken(idToken: string): Promise<GoogleProfile> {
+  // Verify CHỮ KÝ + iss + aud thay vì chỉ base64-decode. Trước đây id_token được
+  // tin tưởng "vì đến từ Google qua TLS" — nhưng không kiểm tra aud nên token cấp
+  // cho một OAuth client khác cũng được chấp nhận (confused-deputy). Nay bắt buộc:
+  //  - chữ ký khớp khoá công khai Google (RS256),
+  //  - iss = accounts.google.com,
+  //  - aud = chính client_id của ứng dụng,
+  //  - còn hạn (exp) — do jwtVerify tự kiểm tra.
+  const { payload } = await jwtVerify(idToken, GOOGLE_JWKS, {
+    issuer: ["https://accounts.google.com", "accounts.google.com"],
+    audience: env.google.clientId,
+    algorithms: ["RS256"],
+  });
+  const ev = payload.email_verified;
   return {
-    sub: p.sub,
-    email: p.email,
-    emailVerified: p.email_verified === true || p.email_verified === "true",
-    name: p.name || p.email,
-    picture: p.picture,
+    sub: String(payload.sub),
+    email: String(payload.email ?? ""),
+    emailVerified: ev === true || ev === "true",
+    name: (typeof payload.name === "string" && payload.name) || String(payload.email ?? ""),
+    picture: typeof payload.picture === "string" ? payload.picture : undefined,
   };
 }
 
@@ -74,5 +83,5 @@ export async function exchangeCode(code: string): Promise<GoogleProfile> {
   }
   const data = (await res.json()) as { id_token?: string };
   if (!data.id_token) throw new Error("Google không trả về id_token");
-  return decodeIdToken(data.id_token);
+  return verifyIdToken(data.id_token);
 }

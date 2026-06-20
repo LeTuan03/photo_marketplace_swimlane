@@ -9,6 +9,7 @@ import { createPaymentUrl, isConfigured } from "@/lib/vnpay";
 import { createPaymentUrl as momoCreate, isConfigured as momoConfigured } from "@/lib/momo";
 import { createPaymentLink as payosCreate, isConfigured as payosConfigured } from "@/lib/payos";
 import { isConfigured as bankConfigured } from "@/lib/bankqr";
+import { mockGatewayEnabled } from "@/lib/gateway";
 import { getSettings, commissionFor } from "@/lib/settings";
 import { makeTxnRef, makeOrderCode } from "@/lib/utils";
 import { env } from "@/lib/env";
@@ -28,12 +29,20 @@ export async function createOrderAndPayAction(formData: FormData) {
 
   const subtotal = valid.reduce((s, c) => s + c.priceVnd, 0);
 
-  // Coupon (B5)
+  // Coupon (B5) — mỗi người dùng chỉ áp dụng MỘT lần để chống lạm dụng mã giảm giá
+  // (đặc biệt mã 100% -> đơn 0đ fulfill miễn phí). Nếu đã từng dùng -> bỏ qua giảm giá.
   let discount = 0;
   let couponId: string | undefined;
   if (couponCode) {
     const coupon = await prisma.coupon.findUnique({ where: { code: couponCode } });
     if (coupon && coupon.active && (!coupon.expiresAt || coupon.expiresAt > new Date())) {
+      const usedBefore = await prisma.order.findFirst({
+        where: { buyerId: user.id, couponId: coupon.id, status: { in: ["PENDING", "PAID"] } },
+        select: { id: true },
+      });
+      if (usedBefore) {
+        redirect("/cart?error=Bạn đã sử dụng mã giảm giá này rồi");
+      }
       discount = Math.round((subtotal * coupon.percentOff) / 100);
       couponId = coupon.id;
     }
@@ -155,6 +164,9 @@ export async function createOrderAndPayAction(formData: FormData) {
     redirect("/checkout?error=Không tạo được giao dịch PayOS, thử lại hoặc đổi cổng");
   }
 
-  // Fallback: cổng giả lập (chưa cấu hình cổng thật)
-  redirect(`/payment/mock?order=${order.id}`);
+  // Fallback: cổng giả lập — CHỈ khi không có cổng thật & không phải production.
+  if (mockGatewayEnabled()) {
+    redirect(`/payment/mock?order=${order.id}`);
+  }
+  redirect("/checkout?error=Chưa cấu hình cổng thanh toán, vui lòng liên hệ quản trị");
 }

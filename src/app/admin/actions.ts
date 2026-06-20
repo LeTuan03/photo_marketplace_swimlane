@@ -176,7 +176,9 @@ export async function resolveDisputeAction(formData: FormData) {
   const percent = Math.min(100, Math.max(1, parseInt(String(formData.get("percent") ?? "100"), 10) || 100));
 
   const dispute = await prisma.dispute.findUnique({ where: { id: disputeId } });
-  if (!dispute) redirect("/admin/disputes");
+  // Chỉ xử lý tranh chấp còn MỞ -> chống replay (double-submit / bấm 2 lần) gây
+  // claw-back nhiều lần, +penaltyPoint nhiều lần, gỡ ảnh lặp lại.
+  if (!dispute || dispute.status !== "OPEN") redirect("/admin/disputes");
 
   if (decision === "refund") {
     if (orderItemId) await refundOrderItem(orderItemId, dispute!.reason, percent);

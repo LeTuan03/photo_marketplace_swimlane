@@ -55,10 +55,15 @@ export function extractTxnRef(content: string): string | null {
   return m ? m[0] : null;
 }
 
-/** (Tuỳ chọn) Xác thực webhook tự xác nhận qua header `Authorization: Apikey <key>`. */
+/**
+ * (Tuỳ chọn) Xác thực webhook tự xác nhận qua header `Authorization: Apikey <key>`.
+ * FAIL-CLOSED: nếu CHƯA cấu hình SEPAY_API_KEY thì TỪ CHỐI mọi request — webhook
+ * không có key là webhook không xác thực, cho phép kẻ tấn công gửi "đã nhận tiền"
+ * giả (khớp memo + số tiền vốn hiển thị cho chính người mua) để fulfill miễn phí.
+ */
 export function verifyWebhookAuth(authHeader: string | null): boolean {
   const expected = env.bank.sepayApiKey;
-  if (!expected) return true; // chưa đặt key -> chấp nhận (chỉ nên dùng khi dev)
+  if (!expected) return false; // chưa đặt key -> từ chối (bật webhook phải có key)
   if (!authHeader) return false;
   const token = authHeader.replace(/^Apikey\s+/i, "").trim();
   const a = Buffer.from(token);

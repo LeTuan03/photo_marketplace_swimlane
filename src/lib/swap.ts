@@ -42,7 +42,22 @@ export async function completeSwap(offerId: string): Promise<void> {
   if (!offer || offer.status !== "ACCEPTED") return;
   if (!offer.initiatorConfirmed || !offer.responderConfirmed) return;
 
-  await prisma.$transaction(async (tx) => {
+  // "Giành" hoàn tất NGUYÊN TỬ: chỉ một luồng chuyển được ACCEPTED -> COMPLETED khi
+  // cả hai bên đã ký. Nếu 2 bên bấm xác nhận gần như đồng thời, chỉ một lần khớp
+  // (count===1) nên không cấp grant/certificate chéo trùng (DownloadGrant không có
+  // ràng buộc unique theo swap nên phải tự chặn ở đây).
+  const claimed = await prisma.$transaction(async (tx) => {
+    const res = await tx.swapOffer.updateMany({
+      where: {
+        id: offer.id,
+        status: "ACCEPTED",
+        initiatorConfirmed: true,
+        responderConfirmed: true,
+      },
+      data: { status: "COMPLETED", completedAt: new Date() },
+    });
+    if (res.count === 0) return false;
+
     // initiator (A) nhận file ảnh được yêu cầu (của B); responder (B) nhận file ảnh A đề nghị
     await tx.downloadGrant.create({ data: makeGrant(offer.initiatorId, offer.requestedPhotoId, offer.id) });
     await tx.downloadGrant.create({ data: makeGrant(offer.responderId, offer.offeredPhotoId, offer.id) });
@@ -52,12 +67,10 @@ export async function completeSwap(offerId: string): Promise<void> {
       where: { id: { in: [offer.offeredPhotoId, offer.requestedPhotoId] } },
       data: { status: "LIVE" },
     });
-
-    await tx.swapOffer.update({
-      where: { id: offer.id },
-      data: { status: "COMPLETED", completedAt: new Date() },
-    });
+    return true;
   });
+
+  if (!claimed) return; // luồng khác đã hoàn tất -> không bắn thông báo trùng
 
   // N6: thông báo cả 2 bên
   await Promise.all([

@@ -2,9 +2,9 @@
 
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { hashPassword, verifyPassword } from "@/lib/password";
+import { hashPassword, verifyPassword, DUMMY_HASH } from "@/lib/password";
 import { createSession, destroySession, getCurrentUser } from "@/lib/auth";
-import { registerSchema, loginSchema } from "@/lib/validation";
+import { registerSchema, loginSchema, safeInternalPath } from "@/lib/validation";
 
 function back(path: string, error: string, extra?: Record<string, string>) {
   const qs = new URLSearchParams({ error, ...(extra ?? {}) });
@@ -38,7 +38,7 @@ export async function registerAction(formData: FormData) {
   });
 
   await createSession({ uid: user.id, email: user.email, name: user.name, role: user.role });
-  redirect(next.startsWith("/") ? next : "/");
+  redirect(safeInternalPath(next));
 }
 
 export async function loginAction(formData: FormData) {
@@ -52,17 +52,20 @@ export async function loginAction(formData: FormData) {
   const { email, password } = parsed.data!;
 
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) back("/login", "Sai email hoặc mật khẩu", { email });
-  if (!user!.passwordHash) {
-    back("/login", "Tài khoản này đăng nhập bằng Google. Vui lòng dùng nút đăng nhập Google.", { email });
-  }
-  if (!(await verifyPassword(password, user!.passwordHash!))) {
+  // LUÔN chạy một phép so sánh bcrypt (dùng hash giả nếu user/hash không có) để
+  // không lộ qua timing là email có tồn tại / có phải tài khoản chỉ-Google không.
+  const ok = await verifyPassword(password, user?.passwordHash ?? DUMMY_HASH);
+
+  // Thông báo CHUNG cho mọi trường hợp sai (không tồn tại / chỉ-Google / sai mật
+  // khẩu) -> chống account enumeration.
+  if (!user || !user.passwordHash || !ok) {
     back("/login", "Sai email hoặc mật khẩu", { email });
   }
+  // Đến đây mật khẩu đã đúng -> mới được phép báo trạng thái khóa.
   if (user!.isBlocked) back("/login", "Tài khoản đã bị khóa");
 
   await createSession({ uid: user!.id, email: user!.email, name: user!.name, role: user!.role });
-  redirect(next.startsWith("/") ? next : "/");
+  redirect(safeInternalPath(next));
 }
 
 export async function logoutAction() {

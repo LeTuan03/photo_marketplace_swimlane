@@ -9,9 +9,17 @@ export type ImageMeta = {
 
 const PREVIEW_MAX = 1280;
 const THUMB_MAX = 480;
+// Giới hạn số điểm ảnh đầu vào (~100MP) để chống "decompression bomb": một file
+// nén nhỏ nhưng giải nén ra cực lớn có thể làm cạn RAM. sharp sẽ ném lỗi khi vượt.
+const MAX_INPUT_PIXELS = 100_000_000;
+
+/** Mở ảnh đầu vào với giới hạn pixel an toàn. */
+function openImage(buffer: Buffer): sharp.Sharp {
+  return sharp(buffer, { limitInputPixels: MAX_INPUT_PIXELS });
+}
 
 export async function readMeta(buffer: Buffer): Promise<ImageMeta> {
-  const m = await sharp(buffer).metadata();
+  const m = await openImage(buffer).metadata();
   return {
     width: m.width ?? 0,
     height: m.height ?? 0,
@@ -43,7 +51,7 @@ function watermarkSvg(width: number, height: number, text = "PICSEO • PREVIEW"
 /** Tạo bản preview có watermark (webp). */
 export async function makeWatermarkedPreview(buffer: Buffer): Promise<Buffer> {
   // Resize ra buffer trước để biết kích thước thật (metadata() bỏ qua các phép biến đổi đang chờ).
-  const resized = await sharp(buffer)
+  const resized = await openImage(buffer)
     .rotate()
     .resize({ width: PREVIEW_MAX, height: PREVIEW_MAX, fit: "inside", withoutEnlargement: true })
     .toBuffer();
@@ -58,7 +66,7 @@ export async function makeWatermarkedPreview(buffer: Buffer): Promise<Buffer> {
 
 /** Thumbnail nhỏ có watermark nhẹ. */
 export async function makeThumb(buffer: Buffer): Promise<Buffer> {
-  return sharp(buffer)
+  return openImage(buffer)
     .rotate()
     .resize({ width: THUMB_MAX, height: THUMB_MAX, fit: "inside", withoutEnlargement: true })
     .webp({ quality: 70 })
@@ -70,7 +78,7 @@ export async function resizeForDelivery(buffer: Buffer, sizeLabel: string): Prom
   const dims: Record<string, number> = { S: 800, M: 1600, L: 2400 };
   const target = dims[sizeLabel];
   if (!target) return buffer; // ORIGINAL -> nguyên gốc
-  return sharp(buffer)
+  return openImage(buffer)
     .rotate()
     .resize({ width: target, height: target, fit: "inside", withoutEnlargement: true })
     .toBuffer();

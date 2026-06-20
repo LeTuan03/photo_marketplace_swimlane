@@ -9,15 +9,16 @@ import { getSettings, planPriceFor, planQuotaFor } from "@/lib/settings";
 import { createPaymentUrl, isConfigured } from "@/lib/vnpay";
 import { createPaymentLink as payosCreate, isConfigured as payosConfigured } from "@/lib/payos";
 import { isConfigured as bankConfigured } from "@/lib/bankqr";
+import { mockGatewayEnabled } from "@/lib/gateway";
 import { makeTxnRef, makeOrderCode, randomToken, makeCertNo } from "@/lib/utils";
 import { signDownloadToken } from "@/lib/download";
 import { env } from "@/lib/env";
 import {
   ensureFreshQuota,
   canDownloadViaPlan,
-  consumeQuota,
   getQuotaState,
 } from "@/lib/subscription";
+import { validSizeLabel } from "@/lib/constants";
 import { notify } from "@/lib/notifications";
 import type { PlanType } from "@prisma/client";
 
@@ -83,7 +84,10 @@ export async function subscribeAction(formData: FormData) {
     });
     redirect(payUrl);
   }
-  redirect(`/payment/mock?sub=${sub.id}`);
+  if (mockGatewayEnabled()) {
+    redirect(`/payment/mock?sub=${sub.id}`);
+  }
+  redirect("/subscription?error=Chưa cấu hình cổng thanh toán, vui lòng liên hệ quản trị");
 }
 
 /** Tắt tự gia hạn (giữ hiệu lực tới hết kỳ). */
@@ -101,7 +105,7 @@ export async function cancelSubscriptionAction() {
 export async function subscriptionDownloadAction(formData: FormData) {
   let user = await requireUser();
   const photoId = String(formData.get("photoId") ?? "");
-  const sizeLabel = String(formData.get("sizeLabel") ?? "ORIGINAL");
+  const sizeLabel = validSizeLabel(String(formData.get("sizeLabel") ?? "ORIGINAL"));
 
   user = await ensureFreshQuota(user);
   const settings = await getSettings();
@@ -114,7 +118,7 @@ export async function subscriptionDownloadAction(formData: FormData) {
   if (!photo || photo.status !== "LIVE") redirect(`/photos/${photoId}?error=Ảnh không khả dụng`);
   if (photo!.sellerId === user.id) redirect(`/photos/${photoId}?error=Đây là ảnh của bạn`);
 
-  // tránh cấp trùng nếu đã có grant subscription cho ảnh này
+  // tránh cấp trùng nếu đã có grant subscription cho ảnh này (re-download không tốn quota)
   const existing = await prisma.downloadGrant.findFirst({
     where: { buyerId: user.id, photoId, source: "SUBSCRIPTION" },
   });
@@ -123,21 +127,37 @@ export async function subscriptionDownloadAction(formData: FormData) {
   if (existing) {
     grantId = existing.id;
   } else {
-    const grant = await prisma.downloadGrant.create({
-      data: {
-        buyerId: user.id,
-        photoId,
-        source: "SUBSCRIPTION",
-        token: randomToken(),
-        certNo: makeCertNo(),
-        licenseType: "COMMERCIAL",
-        sizeLabel,
-        expiresAt: new Date(Date.now() + env.rules.downloadLinkHours * 3600 * 1000),
-        maxDownloads: env.rules.maxDownloads,
-      },
+    // Tiêu thụ quota + tạo grant NGUYÊN TỬ: với gói có giới hạn, chỉ tăng quotaUsed
+    // khi quotaUsed < limit. Bắn N request song song cho N ảnh khác nhau không còn
+    // vượt được hạn mức (trước đây check rồi mới increment -> race tải vô hạn).
+    const newGrantId = await prisma.$transaction(async (tx) => {
+      if (limit >= 0) {
+        const claimed = await tx.user.updateMany({
+          where: { id: user.id, quotaUsed: { lt: limit } },
+          data: { quotaUsed: { increment: 1 } },
+        });
+        if (claimed.count === 0) return null; // hết quota (kể cả do request song song)
+      } else {
+        await tx.user.update({ where: { id: user.id }, data: { quotaUsed: { increment: 1 } } });
+      }
+      const grant = await tx.downloadGrant.create({
+        data: {
+          buyerId: user.id,
+          photoId,
+          source: "SUBSCRIPTION",
+          token: randomToken(),
+          certNo: makeCertNo(),
+          licenseType: "COMMERCIAL",
+          sizeLabel,
+          expiresAt: new Date(Date.now() + env.rules.downloadLinkHours * 3600 * 1000),
+          maxDownloads: env.rules.maxDownloads,
+        },
+      });
+      return grant.id;
     });
-    grantId = grant.id;
-    await consumeQuota(user.id);
+
+    if (!newGrantId) redirect(`/photos/${photoId}?error=Gói của bạn không còn quota`);
+    grantId = newGrantId!;
 
     // N11: cảnh báo khi quota gần hết (gói có giới hạn)
     const after = await prisma.user.findUnique({ where: { id: user.id } });
@@ -156,6 +176,6 @@ export async function subscriptionDownloadAction(formData: FormData) {
     }
   }
 
-  const token = await signDownloadToken(grantId);
+  const token = await signDownloadToken(grantId, user.id);
   redirect(`/api/download?token=${encodeURIComponent(token)}`);
 }

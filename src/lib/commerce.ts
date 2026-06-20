@@ -117,17 +117,18 @@ export async function releaseDueEscrows(): Promise<number> {
 
   let count = 0;
   for (const e of due) {
-    await prisma.$transaction(async (tx) => {
-      const fresh = await tx.escrowHold.findUnique({ where: { id: e.id } });
-      if (!fresh || fresh.status !== "HELD") return;
+    const released = await prisma.$transaction(async (tx) => {
+      // "Giành" escrow nguyên tử HELD -> RELEASED; nếu 2 lần cron chạy chồng nhau
+      // chỉ một lần khớp (count===1) nên không cộng tiền trùng.
+      const claimed = await tx.escrowHold.updateMany({
+        where: { id: e.id, status: "HELD" },
+        data: { status: "RELEASED", releasedAt: new Date() },
+      });
+      if (claimed.count === 0) return false;
 
       const user = await tx.user.update({
         where: { id: e.sellerId },
         data: { balanceVnd: { increment: e.amountVnd } },
-      });
-      await tx.escrowHold.update({
-        where: { id: e.id },
-        data: { status: "RELEASED", releasedAt: new Date() },
       });
       await tx.walletTransaction.create({
         data: {
@@ -139,7 +140,10 @@ export async function releaseDueEscrows(): Promise<number> {
           note: "Giải ngân sau khi hết thời gian giữ escrow",
         },
       });
+      return true;
     });
+
+    if (!released) continue; // đã được luồng khác giải ngân -> không notify/đếm trùng
 
     await notify({
       userId: e.sellerId,
@@ -182,17 +186,21 @@ export async function refundOrderItem(orderItemId: string, reason: string, perce
           await tx.escrowHold.update({ where: { id: item.escrow.id }, data: { amountVnd: sellerKeep } });
         }
       } else if (item.escrow.status === "RELEASED" && clawback > 0) {
-        // người bán đã nhận tiền -> trừ lại phần hoàn
-        const u = await tx.user.findUnique({ where: { id: item.sellerId } });
-        const deduct = Math.min(u?.balanceVnd ?? 0, clawback);
-        const after = (u?.balanceVnd ?? 0) - deduct;
-        await tx.user.update({ where: { id: item.sellerId }, data: { balanceVnd: after } });
+        // Người bán đã nhận tiền -> trừ lại TOÀN BỘ phần hoàn (nguyên tử).
+        // Trước đây trừ tối đa = số dư hiện có (Math.min) nên seller chỉ cần rút
+        // tiền ngay sau giải ngân là thoát claw-back, platform mất trắng. Nay trừ
+        // đủ clawback (cho phép số dư âm = ghi nợ); payout đã chặn rút khi âm.
+        const u = await tx.user.update({
+          where: { id: item.sellerId },
+          data: { balanceVnd: { decrement: clawback } },
+          select: { balanceVnd: true },
+        });
         await tx.walletTransaction.create({
           data: {
             userId: item.sellerId,
             type: "REFUND_ADJUST",
-            amountVnd: -deduct,
-            balanceAfterVnd: after,
+            amountVnd: -clawback,
+            balanceAfterVnd: u.balanceVnd,
             ref: item.id,
             note: `Trừ lại do hoàn ${pct}% cho người mua`,
           },

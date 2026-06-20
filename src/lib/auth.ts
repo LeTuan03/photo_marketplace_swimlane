@@ -3,11 +3,12 @@ import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import { env } from "./env";
 import { prisma } from "./prisma";
-import type { Role } from "@prisma/client";
+import { Role } from "@prisma/client";
 
 const COOKIE_NAME = "picseo_session";
 const secret = new TextEncoder().encode(env.authSecret);
 const MAX_AGE = 60 * 60 * 24 * 7; // 7 ngày
+const VALID_ROLES = new Set<string>(Object.values(Role));
 
 export type SessionPayload = {
   uid: string;
@@ -54,12 +55,14 @@ export async function getSession(): Promise<SessionPayload | null> {
   const token = store.get(COOKIE_NAME)?.value;
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, secret);
+    const { payload } = await jwtVerify(token, secret, { algorithms: ["HS256"] });
+    const role = String(payload.role);
+    if (!VALID_ROLES.has(role)) return null; // role lạ -> coi như phiên không hợp lệ
     return {
       uid: String(payload.uid),
       email: String(payload.email),
       name: String(payload.name),
-      role: payload.role as Role,
+      role: role as Role,
     };
   } catch {
     return null;
