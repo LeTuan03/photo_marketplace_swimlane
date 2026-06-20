@@ -21,3 +21,14 @@ export function makeTxnRef(): string {
   const rnd = crypto.randomBytes(3).toString("hex").toUpperCase();
   return `PIC${ts}${rnd}`;
 }
+
+/**
+ * Mã đơn dạng SỐ cho PayOS (orderCode). PayOS yêu cầu số nguyên dương, duy nhất,
+ * <= Number.MAX_SAFE_INTEGER. Ghép giây-epoch (10 chữ số) với 3 chữ số ngẫu nhiên
+ * cho ~13 chữ số, an toàn dưới 2^53. Trùng lặp cực hiếm và bị ràng buộc unique của
+ * providerTxnRef bắt được (người dùng thử lại).
+ */
+export function makeOrderCode(): number {
+  const sec = Math.floor(Date.now() / 1000);
+  return sec * 1000 + crypto.randomInt(0, 1000);
+}

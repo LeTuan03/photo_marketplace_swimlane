@@ -7,14 +7,17 @@ import { requireUser } from "@/lib/auth";
 import { splitPrice, fulfillPaidOrder } from "@/lib/commerce";
 import { createPaymentUrl, isConfigured } from "@/lib/vnpay";
 import { createPaymentUrl as momoCreate, isConfigured as momoConfigured } from "@/lib/momo";
+import { createPaymentLink as payosCreate, isConfigured as payosConfigured } from "@/lib/payos";
+import { isConfigured as bankConfigured } from "@/lib/bankqr";
 import { getSettings, commissionFor } from "@/lib/settings";
-import { makeTxnRef } from "@/lib/utils";
+import { makeTxnRef, makeOrderCode } from "@/lib/utils";
+import { env } from "@/lib/env";
 
 /** Tạo đơn từ giỏ hàng và khởi tạo thanh toán (TT1 -> TT2). */
 export async function createOrderAndPayAction(formData: FormData) {
   const user = await requireUser();
   const couponCode = String(formData.get("coupon") ?? "").trim().toUpperCase();
-  const provider = String(formData.get("provider") ?? "VNPAY");
+  const provider = String(formData.get("provider") ?? "BANKQR");
 
   const cart = await prisma.cartItem.findMany({
     where: { userId: user.id },
@@ -36,7 +39,11 @@ export async function createOrderAndPayAction(formData: FormData) {
     }
   }
   const total = Math.max(0, subtotal - discount);
-  const txnRef = makeTxnRef();
+
+  // PayOS yêu cầu orderCode dạng SỐ; các cổng khác dùng chuỗi PIC...
+  // providerTxnRef lưu chuỗi (với PayOS là String(orderCode)) để webhook tra cứu.
+  const orderCode = provider === "PAYOS" ? makeOrderCode() : null;
+  const txnRef = orderCode === null ? makeTxnRef() : String(orderCode);
 
   // Tỉ lệ hoa hồng theo tier người bán (AD4) — đọc từ cấu hình admin
   const settings = await getSettings();
@@ -89,6 +96,11 @@ export async function createOrderAndPayAction(formData: FormData) {
     redirect(`/payment/result?status=success&order=${order.id}`);
   }
 
+  // Chuyển khoản VietQR (SePay) — cổng chính: hiển thị QR, webhook tự xác nhận
+  if (provider === "BANKQR" && bankConfigured()) {
+    redirect(`/payment/bank?order=${order.id}`);
+  }
+
   // VNPay thật nếu đã cấu hình; nếu chưa -> cổng giả lập cho dev
   if (provider === "VNPAY" && isConfigured()) {
     const h = await headers();
@@ -120,6 +132,27 @@ export async function createOrderAndPayAction(formData: FormData) {
       redirect(payUrl); // redirect ngoài try/catch
     }
     redirect("/checkout?error=Không tạo được giao dịch MoMo, thử lại hoặc đổi cổng");
+  }
+
+  // PayOS (VietQR) thật nếu đã cấu hình (gọi API tạo link thanh toán)
+  if (provider === "PAYOS" && payosConfigured() && orderCode !== null) {
+    let payUrl: string | null = null;
+    try {
+      payUrl = await payosCreate({
+        orderCode,
+        amountVnd: total,
+        description: `Picseo ${order.id.slice(-8)}`, // <= 25 ký tự
+        returnUrl: `${env.appUrl}/api/payment/payos/callback`,
+        cancelUrl: `${env.appUrl}/api/payment/payos/callback`,
+      });
+    } catch (e) {
+      console.error("PayOS create error:", e);
+    }
+    if (payUrl) {
+      await prisma.order.update({ where: { id: order.id }, data: { payUrl } });
+      redirect(payUrl); // redirect ngoài try/catch
+    }
+    redirect("/checkout?error=Không tạo được giao dịch PayOS, thử lại hoặc đổi cổng");
   }
 
   // Fallback: cổng giả lập (chưa cấu hình cổng thật)

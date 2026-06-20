@@ -7,7 +7,9 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { getSettings, planPriceFor, planQuotaFor } from "@/lib/settings";
 import { createPaymentUrl, isConfigured } from "@/lib/vnpay";
-import { makeTxnRef, randomToken, makeCertNo } from "@/lib/utils";
+import { createPaymentLink as payosCreate, isConfigured as payosConfigured } from "@/lib/payos";
+import { isConfigured as bankConfigured } from "@/lib/bankqr";
+import { makeTxnRef, makeOrderCode, randomToken, makeCertNo } from "@/lib/utils";
 import { signDownloadToken } from "@/lib/download";
 import { env } from "@/lib/env";
 import {
@@ -34,11 +36,42 @@ export async function subscribeAction(formData: FormData) {
 
   const settings = await getSettings();
   const price = planPriceFor(plan, settings);
-  const txnRef = makeTxnRef();
+
+  // Chuyển khoản VietQR (SePay) — cổng chính
+  if (bankConfigured()) {
+    const txnRef = makeTxnRef();
+    const sub = await prisma.subscription.create({
+      data: { userId: user.id, plan, status: "PENDING", priceVnd: price, providerTxnRef: txnRef },
+    });
+    redirect(`/payment/bank?sub=${sub.id}`);
+  }
+
+  // PayOS dùng orderCode dạng số; cổng khác dùng chuỗi PIC...
+  const orderCode = payosConfigured() ? makeOrderCode() : null;
+  const txnRef = orderCode === null ? makeTxnRef() : String(orderCode);
   const sub = await prisma.subscription.create({
     data: { userId: user.id, plan, status: "PENDING", priceVnd: price, providerTxnRef: txnRef },
   });
 
+  // PayOS (VietQR) — cổng chính
+  if (orderCode !== null) {
+    let payUrl: string | null = null;
+    try {
+      payUrl = await payosCreate({
+        orderCode,
+        amountVnd: price,
+        description: `Picseo goi ${plan}`, // <= 25 ký tự
+        returnUrl: `${env.appUrl}/api/payment/payos/callback`,
+        cancelUrl: `${env.appUrl}/api/payment/payos/callback`,
+      });
+    } catch (e) {
+      console.error("PayOS create error:", e);
+    }
+    if (payUrl) redirect(payUrl); // redirect ngoài try/catch
+    redirect("/subscription?error=Không tạo được giao dịch PayOS, thử lại");
+  }
+
+  // VNPay (nếu còn cấu hình) -> nếu không, cổng giả lập
   if (isConfigured()) {
     const h = await headers();
     const ip = (h.get("x-forwarded-for") ?? "127.0.0.1").split(",")[0].trim();

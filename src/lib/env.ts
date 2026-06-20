@@ -53,6 +53,22 @@ export const env = {
     endpoint: str("MOMO_ENDPOINT", "https://test-payment.momo.vn/v2/gateway/api/create"),
   },
 
+  payos: {
+    clientId: str("PAYOS_CLIENT_ID"),
+    apiKey: str("PAYOS_API_KEY"),
+    checksumKey: str("PAYOS_CHECKSUM_KEY"),
+    createUrl: str("PAYOS_CREATE_URL", "https://api-merchant.payos.vn/v2/payment-requests"),
+  },
+
+  // Chuyển khoản VietQR + giám sát biến động số dư qua SePay (hoặc Casso)
+  bank: {
+    bankId: str("BANK_ID"), // mã NH cho VietQR/SePay, vd: MBBank, Vietcombank, ACB
+    account: str("BANK_ACCOUNT"), // số tài khoản nhận tiền
+    accountName: str("BANK_ACCOUNT_NAME"), // tên chủ tài khoản (hiển thị)
+    sepayApiKey: str("SEPAY_API_KEY"), // token xác thực webhook (Authorization: Apikey ...)
+    qrUrl: str("SEPAY_QR_URL", "https://qr.sepay.vn/img"),
+  },
+
   google: {
     clientId: str("GOOGLE_CLIENT_ID"),
     clientSecret: str("GOOGLE_CLIENT_SECRET"),

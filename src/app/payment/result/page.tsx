@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
+import { CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { formatVnd } from "@/lib/money";
+import { AutoRefresh } from "@/components/AutoRefresh";
 
 export const dynamic = "force-dynamic";
 
@@ -29,11 +30,26 @@ export default async function PaymentResultPage({
       : null;
 
   const success = sp.status === "success" && order?.status === "PAID";
+  // Người mua quay về (PayOS) trước khi webhook kịp xác nhận: đơn còn PENDING.
+  const processing = sp.status === "success" && !!order && order.status === "PENDING";
 
   return (
     <div className="mx-auto mt-8 max-w-lg">
       <div className="card p-8 text-center">
-        {success ? (
+        {processing && <AutoRefresh seconds={3} />}
+        {processing ? (
+          <>
+            <Loader2 className="mx-auto h-14 w-14 animate-spin text-brand-500" />
+            <h1 className="mt-3 text-2xl font-bold text-gray-900">Đang xác nhận thanh toán…</h1>
+            <p className="mt-2 text-sm text-gray-600">
+              Đơn hàng <strong>{order!.id.slice(-8).toUpperCase()}</strong> · {formatVnd(order!.totalVnd)}. Hệ thống
+              đang chờ xác nhận từ cổng thanh toán — trang sẽ tự cập nhật trong giây lát.
+            </p>
+            <div className="mt-5 flex justify-center gap-2">
+              <Link href="/library" className="btn-outline">Tới thư viện</Link>
+            </div>
+          </>
+        ) : success ? (
           <>
             <CheckCircle2 className="mx-auto h-14 w-14 text-emerald-500" />
             <h1 className="mt-3 text-2xl font-bold text-gray-900">Thanh toán thành công!</h1>

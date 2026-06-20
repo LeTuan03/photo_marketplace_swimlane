@@ -22,16 +22,20 @@ export async function fulfillPaidOrder(orderId: string, providerTxnId?: string):
     include: { items: { include: { photo: true } } },
   });
   if (!order) throw new Error("ORDER_NOT_FOUND");
-  if (order.status === "PAID") return; // đã xử lý
+  if (order.status === "PAID") return; // đã xử lý (kiểm tra nhanh trước khi vào transaction)
 
   const holdUntil = new Date(Date.now() + env.rules.escrowHoldDays * 24 * 3600 * 1000);
   const downloadExpiry = new Date(Date.now() + env.rules.downloadLinkHours * 3600 * 1000);
 
-  await prisma.$transaction(async (tx) => {
-    await tx.order.update({
-      where: { id: order.id },
+  // "Giành" đơn nguyên tử: chỉ tiến hành nếu chuyển được PENDING -> PAID.
+  // Webhook và return-URL (hoặc nhiều lần retry webhook) có thể chạy đồng thời;
+  // updateMany có điều kiện status đảm bảo CHỈ một luồng tạo escrow/grant.
+  const didFulfill = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.order.updateMany({
+      where: { id: order.id, status: "PENDING" },
       data: { status: "PAID", paidAt: new Date(), providerTxnId },
     });
+    if (claimed.count === 0) return false; // luồng khác đã xử lý
 
     for (const item of order.items) {
       // Escrow giữ tiền 7 ngày
@@ -66,7 +70,10 @@ export async function fulfillPaidOrder(orderId: string, providerTxnId?: string):
         data: { salesCount: { increment: 1 } },
       });
     }
+    return true;
   });
+
+  if (!didFulfill) return; // không phải luồng thắng -> không bắn thông báo trùng
 
   // Thông báo (ngoài transaction)
   await notify({

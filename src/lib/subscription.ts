@@ -52,15 +52,18 @@ export async function activateSubscription(subId: string, providerTxnId?: string
   const now = new Date();
   const periodEnd = new Date(now.getTime() + PERIOD_MS);
 
-  await prisma.$transaction(async (tx) => {
-    // hủy các sub ACTIVE cũ
-    await tx.subscription.updateMany({
-      where: { userId: sub.userId, status: "ACTIVE" },
-      data: { status: "CANCELLED" },
-    });
-    await tx.subscription.update({
-      where: { id: sub.id },
+  // Giành sub nguyên tử (PENDING -> ACTIVE): webhook có thể retry nhiều lần.
+  const didActivate = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.subscription.updateMany({
+      where: { id: sub.id, status: "PENDING" },
       data: { status: "ACTIVE", startedAt: now, currentPeriodEnd: periodEnd },
+    });
+    if (claimed.count === 0) return false; // đã kích hoạt bởi luồng khác
+
+    // hủy các sub ACTIVE cũ (trừ chính nó)
+    await tx.subscription.updateMany({
+      where: { userId: sub.userId, status: "ACTIVE", id: { not: sub.id } },
+      data: { status: "CANCELLED" },
     });
     await tx.user.update({
       where: { id: sub.userId },
@@ -71,7 +74,10 @@ export async function activateSubscription(subId: string, providerTxnId?: string
         quotaResetAt: periodEnd,
       },
     });
+    return true;
   });
+
+  if (!didActivate) return;
 
   await notify({
     userId: sub.userId,
