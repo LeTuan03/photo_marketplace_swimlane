@@ -21,6 +21,7 @@ import {
 import { validSizeLabel } from "@/lib/constants";
 import { notify } from "@/lib/notifications";
 import type { PlanType } from "@prisma/client";
+import type { DownloadResult } from "@/components/DownloadButton";
 
 /** B7: đăng ký gói. FREE -> hạ gói ngay; PRO/UNLIMITED -> thanh toán. */
 export async function subscribeAction(formData: FormData) {
@@ -101,8 +102,15 @@ export async function cancelSubscriptionAction() {
   redirect("/subscription?cancelled=1");
 }
 
-/** "Còn quota? -> tải miễn phí": tải ảnh bằng gói thay vì mua lẻ. */
-export async function subscriptionDownloadAction(formData: FormData) {
+/**
+ * "Còn quota? -> tải miễn phí": tải ảnh bằng gói thay vì mua lẻ.
+ * TRẢ url cho client tự kích hoạt tải (không redirect) để nút không kẹt pending —
+ * xem giải thích trong components/DownloadButton.tsx.
+ */
+export async function subscriptionDownloadAction(
+  _prev: DownloadResult | null,
+  formData: FormData,
+): Promise<DownloadResult> {
   let user = await requireUser();
   const photoId = String(formData.get("photoId") ?? "");
   const sizeLabel = validSizeLabel(String(formData.get("sizeLabel") ?? "ORIGINAL"));
@@ -177,5 +185,5 @@ export async function subscriptionDownloadAction(formData: FormData) {
   }
 
   const token = await signDownloadToken(grantId, user.id);
-  redirect(`/api/download?token=${encodeURIComponent(token)}`);
+  return { url: `/api/download?token=${encodeURIComponent(token)}` };
 }

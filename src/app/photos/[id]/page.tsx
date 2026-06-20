@@ -12,6 +12,7 @@ import { submitReviewAction, deleteReviewAction } from "./actions";
 import { getCurrentUser } from "@/lib/auth";
 import { getQuotaState } from "@/lib/subscription";
 import { SubmitButton } from "@/components/SubmitButton";
+import { DownloadButton } from "@/components/DownloadButton";
 import { Alert } from "@/components/ui";
 import { Stars, RatingSummary } from "@/components/Stars";
 import { StarInput } from "@/components/StarInput";
@@ -160,14 +161,16 @@ export default async function PhotoDetailPage({
             </form>
 
             {canSubDownload && (
-              <form action={subscriptionDownloadAction} className="mt-3 border-t border-gray-100 pt-3">
-                <input type="hidden" name="photoId" value={photo.id} />
-                <input type="hidden" name="sizeLabel" value="ORIGINAL" />
-                <SubmitButton className="btn-ghost w-full border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+              <div className="mt-3 border-t border-gray-100 pt-3">
+                <DownloadButton
+                  action={subscriptionDownloadAction}
+                  fields={{ photoId: photo.id, sizeLabel: "ORIGINAL" }}
+                  className="btn-ghost w-full border border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                >
                   Tải miễn phí bằng gói {quota!.plan}
                   {quota!.limit > 0 ? ` · còn ${quota!.remaining} lượt` : " · không giới hạn"}
-                </SubmitButton>
-              </form>
+                </DownloadButton>
+              </div>
             )}
 
             {photo.allowSwap && !isOwner && (

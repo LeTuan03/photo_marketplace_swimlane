@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { publicAssetUrl } from "@/lib/storage";
 import { LICENSE_LABELS } from "@/lib/constants";
 import { requestDownloadAction } from "./actions";
-import { SubmitButton } from "@/components/SubmitButton";
+import { DownloadButton } from "@/components/DownloadButton";
 import { PageHeader, EmptyState, Alert } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -56,12 +56,14 @@ export default async function LibraryPage({
                     <BadgeCheck className="h-3.5 w-3.5" /> Cert: {g.certNo}
                   </p>
                   <p className="text-xs text-gray-400">Còn {remaining}/{g.maxDownloads} lượt tải</p>
-                  <form action={requestDownloadAction}>
-                    <input type="hidden" name="grantId" value={g.id} />
-                    <SubmitButton className="btn-primary w-full" pendingText="Đang tạo link...">
-                      <Download className="h-4 w-4" /> {remaining > 0 ? "Tải file gốc" : "Hết lượt tải"}
-                    </SubmitButton>
-                  </form>
+                  <DownloadButton
+                    action={requestDownloadAction}
+                    fields={{ grantId: g.id }}
+                    className="btn-primary w-full"
+                    pendingText="Đang tạo link..."
+                  >
+                    <Download className="h-4 w-4" /> {remaining > 0 ? "Tải file gốc" : "Hết lượt tải"}
+                  </DownloadButton>
                 </div>
               </div>
             );
