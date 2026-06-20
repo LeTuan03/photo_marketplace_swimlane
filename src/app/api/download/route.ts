@@ -58,13 +58,25 @@ export async function GET(req: NextRequest) {
   }
 
   const ext = grant.photo.format === "png" ? "png" : "jpg";
-  const safeName = grant.photo.title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "picseo";
-  const filename = `${safeName}-${grant.sizeLabel}.${ext}`;
+  // Tên đẹp giữ nguyên chữ Unicode (tiếng Việt) — dùng cho filename* (RFC 5987).
+  const prettyName = grant.photo.title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "picseo";
+  // Header HTTP chỉ nhận ByteString (Latin-1, 0-255). Ký tự > 255 (vd "Ỉ"=7848) sẽ
+  // ném lỗi khi dựng response -> phần filename= dự phòng phải rút về ASCII thuần.
+  const asciiName =
+    prettyName
+      .normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "") // bỏ dấu thanh/dấu phụ sau khi tách
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "picseo";
+  const filename = `${prettyName}-${grant.sizeLabel}.${ext}`;
+  const asciiFilename = `${asciiName}-${grant.sizeLabel}.${ext}`;
 
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Content-Type": grant.photo.format === "png" ? "image/png" : "image/jpeg",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      // filename= cho client cũ (ASCII), filename*= cho UTF-8 (browser hiện đại ưu tiên).
+      "Content-Disposition": `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
       "Cache-Control": "no-store",
     },
   });
