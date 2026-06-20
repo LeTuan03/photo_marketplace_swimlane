@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 export type DownloadResult = { url?: string; error?: string };
@@ -45,6 +46,7 @@ export function DownloadButton({
   pendingText?: string;
   children: ReactNode;
 }) {
+  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -77,6 +79,10 @@ export function DownloadButton({
       a.click();
       a.remove();
       URL.revokeObjectURL(obj);
+
+      // Tải xong: làm mới RSC để cập nhật số "còn N lượt" (quota đã trừ ở server)
+      // mà không cần F5. Tải lại cùng ảnh không trừ quota nên số có thể giữ nguyên.
+      router.refresh();
     });
   }
 
