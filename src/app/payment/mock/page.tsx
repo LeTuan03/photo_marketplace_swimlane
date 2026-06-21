@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { redirectError } from "@/lib/nav";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { formatVnd } from "@/lib/money";
@@ -22,7 +23,7 @@ export default async function MockPaymentPage({
 }) {
   const sp = await searchParams;
   const user = await requireUser();
-  if (!mockGatewayEnabled()) redirect("/cart?error=Cổng thanh toán giả lập đã bị vô hiệu");
+  if (!mockGatewayEnabled()) redirectError("/cart?error=Cổng thanh toán giả lập đã bị vô hiệu");
 
   // Luồng subscription
   if (sp.sub) {

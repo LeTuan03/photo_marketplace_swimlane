@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { redirectError } from "@/lib/nav";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
@@ -75,7 +76,7 @@ export async function subscribeAction(formData: FormData) {
       console.error("PayOS create error:", e);
     }
     if (payUrl) redirect(payUrl); // redirect ngoài try/catch
-    redirect("/subscription?error=Không tạo được giao dịch PayOS, thử lại");
+    redirectError("/subscription?error=Không tạo được giao dịch PayOS, thử lại");
   }
 
   // VNPay (nếu còn cấu hình) -> nếu không, cổng giả lập
@@ -93,7 +94,7 @@ export async function subscribeAction(formData: FormData) {
   if (mockGatewayEnabled()) {
     redirect(`/payment/mock?sub=${sub.id}`);
   }
-  redirect("/subscription?error=Chưa cấu hình cổng thanh toán, vui lòng liên hệ quản trị");
+  redirectError("/subscription?error=Chưa cấu hình cổng thanh toán, vui lòng liên hệ quản trị");
 }
 
 /** Tắt tự gia hạn (giữ hiệu lực tới hết kỳ). */
@@ -121,12 +122,12 @@ export async function subscriptionDownloadAction(formData: FormData): Promise<Do
   const settings = await getSettings();
   const limit = planQuotaFor(user.planType, settings);
   if (!canDownloadViaPlan(user, limit)) {
-    redirect(`/photos/${photoId}?error=Gói của bạn không còn quota hoặc đã hết hạn`);
+    redirectError(`/photos/${photoId}?error=Gói của bạn không còn quota hoặc đã hết hạn`);
   }
 
   const photo = await prisma.photo.findUnique({ where: { id: photoId } });
-  if (!photo || photo.status !== "LIVE") redirect(`/photos/${photoId}?error=Ảnh không khả dụng`);
-  if (photo!.sellerId === user.id) redirect(`/photos/${photoId}?error=Đây là ảnh của bạn`);
+  if (!photo || photo.status !== "LIVE") redirectError(`/photos/${photoId}?error=Ảnh không khả dụng`);
+  if (photo!.sellerId === user.id) redirectError(`/photos/${photoId}?error=Đây là ảnh của bạn`);
 
   // tránh cấp trùng nếu đã có grant subscription cho ảnh này (re-download không tốn quota)
   const existing = await prisma.downloadGrant.findFirst({
@@ -170,7 +171,7 @@ export async function subscriptionDownloadAction(formData: FormData): Promise<Do
       return grant.id;
     });
 
-    if (!newGrantId) redirect(`/photos/${photoId}?error=Gói của bạn không còn quota`);
+    if (!newGrantId) redirectError(`/photos/${photoId}?error=Gói của bạn không còn quota`);
     grantId = newGrantId!;
 
     // N11: cảnh báo khi quota gần hết (gói có giới hạn)

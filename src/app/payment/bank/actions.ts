@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { redirectError } from "@/lib/nav";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { notifyAdmins } from "@/lib/notifications";
@@ -17,7 +18,7 @@ export async function notifyBankTransferAction(formData: FormData) {
 
   if (orderId) {
     const order = await prisma.order.findFirst({ where: { id: orderId, buyerId: user.id } });
-    if (!order) redirect("/cart?error=Đơn hàng không hợp lệ");
+    if (!order) redirectError("/cart?error=Đơn hàng không hợp lệ");
     if (order!.status !== "PAID") {
       await notifyAdmins(
         "Đơn chờ xác nhận chuyển khoản",
@@ -29,7 +30,7 @@ export async function notifyBankTransferAction(formData: FormData) {
 
   if (subId) {
     const sub = await prisma.subscription.findFirst({ where: { id: subId, userId: user.id } });
-    if (!sub) redirect("/subscription?error=Không hợp lệ");
+    if (!sub) redirectError("/subscription?error=Không hợp lệ");
     if (sub!.status !== "ACTIVE") {
       await notifyAdmins(
         "Gói chờ xác nhận chuyển khoản",

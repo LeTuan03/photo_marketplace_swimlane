@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
+import { redirectError } from "@/lib/nav";
 import { ArrowLeftRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
@@ -26,7 +27,7 @@ export default async function NewSwapPage({
     include: { seller: { select: { name: true } }, licenses: true },
   });
   if (!target || target.status !== "LIVE" || !target.allowSwap) notFound();
-  if (target.sellerId === user.id) redirect(`/photos/${target.id}?error=Đây là ảnh của bạn`);
+  if (target.sellerId === user.id) redirectError(`/photos/${target.id}?error=Đây là ảnh của bạn`);
 
   const myPhotos = await prisma.photo.findMany({
     where: { sellerId: user.id, status: "LIVE", allowSwap: true },

@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { redirectError } from "@/lib/nav";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
@@ -64,7 +65,7 @@ function slugify(name: string): string {
 export async function createCategoryAction(formData: FormData) {
   await requireRole("ADMIN");
   const name = String(formData.get("name") ?? "").trim().slice(0, 60);
-  if (!name) redirect("/admin/categories?error=Tên danh mục trống");
+  if (!name) redirectError("/admin/categories?error=Tên danh mục trống");
   let slug = slugify(name);
   // đảm bảo slug duy nhất
   if (await prisma.category.findUnique({ where: { slug } })) slug = `${slug}-${Date.now().toString(36).slice(-4)}`;

@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { redirectError } from "@/lib/nav";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
@@ -41,17 +42,17 @@ export async function uploadPhotoAction(formData: FormData) {
   const files = formData
     .getAll("file")
     .filter((x): x is File => x instanceof File && x.size > 0);
-  if (files.length === 0) redirect("/seller/upload?error=Vui lòng chọn file ảnh");
-  if (files.length > MAX_BATCH) redirect(`/seller/upload?error=Tối đa ${MAX_BATCH} ảnh mỗi lần`);
+  if (files.length === 0) redirectError("/seller/upload?error=Vui lòng chọn file ảnh");
+  if (files.length > MAX_BATCH) redirectError(`/seller/upload?error=Tối đa ${MAX_BATCH} ảnh mỗi lần`);
 
   const licenses = collectLicenses(formData);
-  if (licenses.length === 0) redirect("/seller/upload?error=Chọn ít nhất 1 loại license và đặt giá > 0");
+  if (licenses.length === 0) redirectError("/seller/upload?error=Chọn ít nhất 1 loại license và đặt giá > 0");
 
   // Metadata dùng chung cho cả batch
   const baseTitle = String(formData.get("title") ?? "").trim().slice(0, 120);
   const single = files.length === 1;
   if (single && baseTitle && baseTitle.length < 3) {
-    redirect("/seller/upload?error=Tiêu đề tối thiểu 3 ký tự");
+    redirectError("/seller/upload?error=Tiêu đề tối thiểu 3 ký tự");
   }
   const description = String(formData.get("description") ?? "").slice(0, 2000);
   const tags = parseTags(String(formData.get("tags") ?? ""));
@@ -139,7 +140,7 @@ export async function uploadPhotoAction(formData: FormData) {
     }
   }
 
-  if (created === 0) redirect("/seller/upload?error=Không tải lên được ảnh nào (sai định dạng hoặc lỗi xử lý)");
+  if (created === 0) redirectError("/seller/upload?error=Không tải lên được ảnh nào (sai định dạng hoặc lỗi xử lý)");
 
   await notifyAdmins(
     "Ảnh mới chờ duyệt",
@@ -257,7 +258,7 @@ export async function submitCounterClaimAction(formData: FormData) {
   const user = await requireRole("SELLER", "ADMIN");
   const claimId = String(formData.get("claimId") ?? "");
   const statement = String(formData.get("statement") ?? "").slice(0, 1000);
-  if (!statement) redirect("/seller/inventory?error=Vui lòng nhập nội dung phản biện");
+  if (!statement) redirectError("/seller/inventory?error=Vui lòng nhập nội dung phản biện");
 
   const claim = await prisma.dmcaClaim.findUnique({
     where: { id: claimId },
@@ -291,10 +292,10 @@ export async function requestPayoutAction(formData: FormData) {
   const { amountVnd, method, destination } = parsed.data;
 
   if (amountVnd < env.rules.minPayoutVnd) {
-    redirect(`/seller/earnings?error=Số tiền rút tối thiểu là ${env.rules.minPayoutVnd.toLocaleString("vi-VN")}đ`);
+    redirectError(`/seller/earnings?error=Số tiền rút tối thiểu là ${env.rules.minPayoutVnd.toLocaleString("vi-VN")}đ`);
   }
   if (user.kycStatus !== "VERIFIED") {
-    redirect("/seller/earnings?error=Cần xác minh danh tính (KYC) trước khi rút tiền");
+    redirectError("/seller/earnings?error=Cần xác minh danh tính (KYC) trước khi rút tiền");
   }
 
   // Trừ số dư NGUYÊN TỬ + có điều kiện (chống đua điều kiện rút vượt số dư):
@@ -323,6 +324,6 @@ export async function requestPayoutAction(formData: FormData) {
     return true;
   });
 
-  if (!ok) redirect("/seller/earnings?error=Số dư không đủ");
+  if (!ok) redirectError("/seller/earnings?error=Số dư không đủ");
   redirect("/seller/earnings?payout=1");
 }

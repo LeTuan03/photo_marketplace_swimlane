@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { redirectError } from "@/lib/nav";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
@@ -59,7 +60,7 @@ export async function createOrderAndPayAction(formData: FormData) {
       sellerEarningVnd,
     }];
   });
-  if (lineItems.length === 0) redirect("/cart?error=Không có sản phẩm hợp lệ để thanh toán");
+  if (lineItems.length === 0) redirectError("/cart?error=Không có sản phẩm hợp lệ để thanh toán");
 
   const subtotal = lineItems.reduce((s, i) => s + i.priceVnd, 0);
   const totalPlatformFee = lineItems.reduce((s, i) => s + i.platformFeeVnd, 0);
@@ -76,7 +77,7 @@ export async function createOrderAndPayAction(formData: FormData) {
         select: { id: true },
       });
       if (usedBefore) {
-        redirect("/cart?error=Bạn đã sử dụng mã giảm giá này rồi");
+        redirectError("/cart?error=Bạn đã sử dụng mã giảm giá này rồi");
       }
       discount = Math.round((subtotal * coupon.percentOff) / 100);
       couponId = coupon.id;
@@ -154,7 +155,7 @@ export async function createOrderAndPayAction(formData: FormData) {
       await prisma.order.update({ where: { id: order.id }, data: { payUrl } });
       redirect(payUrl); // redirect ngoài try/catch
     }
-    redirect("/checkout?error=Không tạo được giao dịch MoMo, thử lại hoặc đổi cổng");
+    redirectError("/checkout?error=Không tạo được giao dịch MoMo, thử lại hoặc đổi cổng");
   }
 
   // PayOS (VietQR) thật nếu đã cấu hình (gọi API tạo link thanh toán)
@@ -175,12 +176,12 @@ export async function createOrderAndPayAction(formData: FormData) {
       await prisma.order.update({ where: { id: order.id }, data: { payUrl } });
       redirect(payUrl); // redirect ngoài try/catch
     }
-    redirect("/checkout?error=Không tạo được giao dịch PayOS, thử lại hoặc đổi cổng");
+    redirectError("/checkout?error=Không tạo được giao dịch PayOS, thử lại hoặc đổi cổng");
   }
 
   // Fallback: cổng giả lập — CHỈ khi không có cổng thật & không phải production.
   if (mockGatewayEnabled()) {
     redirect(`/payment/mock?order=${order.id}`);
   }
-  redirect("/checkout?error=Chưa cấu hình cổng thanh toán, vui lòng liên hệ quản trị");
+  redirectError("/checkout?error=Chưa cấu hình cổng thanh toán, vui lòng liên hệ quản trị");
 }

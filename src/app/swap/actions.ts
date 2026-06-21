@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { redirectError } from "@/lib/nav";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
@@ -16,7 +17,7 @@ export async function createSwapOfferAction(formData: FormData) {
   const offeredPhotoId = String(formData.get("offeredPhotoId") ?? "");
   const message = String(formData.get("message") ?? "").slice(0, 500);
 
-  if (!offeredPhotoId) redirect(`/swap/new?target=${requestedPhotoId}&error=Hãy chọn 1 ảnh của bạn để đổi`);
+  if (!offeredPhotoId) redirectError(`/swap/new?target=${requestedPhotoId}&error=Hãy chọn 1 ảnh của bạn để đổi`);
 
   const [requested, offered] = await Promise.all([
     prisma.photo.findUnique({ where: { id: requestedPhotoId }, include: { licenses: true } }),
@@ -24,11 +25,11 @@ export async function createSwapOfferAction(formData: FormData) {
   ]);
 
   if (!requested || requested.status !== "LIVE" || !requested.allowSwap) {
-    redirect(`/photos/${requestedPhotoId}?error=Ảnh này không nhận trao đổi`);
+    redirectError(`/photos/${requestedPhotoId}?error=Ảnh này không nhận trao đổi`);
   }
-  if (requested!.sellerId === user.id) redirect(`/photos/${requestedPhotoId}?error=Đây là ảnh của bạn`);
+  if (requested!.sellerId === user.id) redirectError(`/photos/${requestedPhotoId}?error=Đây là ảnh của bạn`);
   if (!offered || offered.sellerId !== user.id || offered.status !== "LIVE") {
-    redirect(`/swap/new?target=${requestedPhotoId}&error=Ảnh đề nghị không hợp lệ`);
+    redirectError(`/swap/new?target=${requestedPhotoId}&error=Ảnh đề nghị không hợp lệ`);
   }
 
   const topUp = computeSuggestedTopUp(
@@ -75,7 +76,7 @@ export async function respondSwapAction(formData: FormData) {
 
   if (offer!.expiresAt <= new Date()) {
     await prisma.swapOffer.updateMany({ where: { id: offerId, status: "PENDING" }, data: { status: "EXPIRED" } });
-    redirect("/swap?error=Đề nghị đã hết hạn");
+    redirectError("/swap?error=Đề nghị đã hết hạn");
   }
 
   if (decision === "decline") {
@@ -132,7 +133,7 @@ export async function respondSwapAction(formData: FormData) {
   });
 
   if (ok === false) redirect("/swap");
-  if (ok === "unavailable") redirect("/swap?error=Một trong hai ảnh không còn khả dụng");
+  if (ok === "unavailable") redirectError("/swap?error=Một trong hai ảnh không còn khả dụng");
 
   await notify({
     userId: offer!.initiatorId,

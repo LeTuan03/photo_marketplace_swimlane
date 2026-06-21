@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { redirectError } from "@/lib/nav";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { fulfillPaidOrder } from "@/lib/commerce";
@@ -9,13 +10,13 @@ import { mockGatewayEnabled } from "@/lib/gateway";
 
 /** Chặn cổng giả lập khi đã có cổng thật / ở production (chống bypass thanh toán). */
 function assertMockEnabled() {
-  if (!mockGatewayEnabled()) redirect("/cart?error=Cổng thanh toán giả lập đã bị vô hiệu");
+  if (!mockGatewayEnabled()) redirectError("/cart?error=Cổng thanh toán giả lập đã bị vô hiệu");
 }
 
 async function loadOwnPendingOrder(orderId: string) {
   const user = await requireUser();
   const order = await prisma.order.findUnique({ where: { id: orderId } });
-  if (!order || order.buyerId !== user.id) redirect("/cart?error=Đơn hàng không hợp lệ");
+  if (!order || order.buyerId !== user.id) redirectError("/cart?error=Đơn hàng không hợp lệ");
   return order!;
 }
 
@@ -44,7 +45,7 @@ export async function mockSubSuccessAction(formData: FormData) {
   const user = await requireUser();
   const subId = String(formData.get("subId") ?? "");
   const sub = await prisma.subscription.findUnique({ where: { id: subId } });
-  if (!sub || sub.userId !== user.id) redirect("/subscription?error=Không hợp lệ");
+  if (!sub || sub.userId !== user.id) redirectError("/subscription?error=Không hợp lệ");
   if (sub!.status === "PENDING") await activateSubscription(sub!.id, `MOCK-${Date.now()}`);
   redirect("/subscription?activated=1");
 }
@@ -57,5 +58,5 @@ export async function mockSubFailAction(formData: FormData) {
   if (sub && sub.userId === user.id && sub.status === "PENDING") {
     await prisma.subscription.update({ where: { id: sub.id }, data: { status: "CANCELLED" } });
   }
-  redirect("/subscription?error=Thanh toán thất bại");
+  redirectError("/subscription?error=Thanh toán thất bại");
 }

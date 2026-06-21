@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { redirectError } from "@/lib/nav";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
@@ -21,13 +22,13 @@ export async function addToCartAction(formData: FormData) {
     where: { id: photoId },
     include: { licenses: true },
   });
-  if (!photo || photo.status !== "LIVE") redirect(`/photos/${photoId}?error=Ảnh không khả dụng`);
+  if (!photo || photo.status !== "LIVE") redirectError(`/photos/${photoId}?error=Ảnh không khả dụng`);
 
   const license = photo!.licenses.find((l) => l.type === licenseType);
-  if (!license) redirect(`/photos/${photoId}?error=License không hợp lệ`);
+  if (!license) redirectError(`/photos/${photoId}?error=License không hợp lệ`);
 
   if (photo!.sellerId === user!.id) {
-    redirect(`/photos/${photoId}?error=Không thể mua ảnh của chính bạn`);
+    redirectError(`/photos/${photoId}?error=Không thể mua ảnh của chính bạn`);
   }
 
   // Chặn mua lại đúng ảnh + đúng license người mua đã sở hữu (grant còn quyền tải).
@@ -35,7 +36,7 @@ export async function addToCartAction(formData: FormData) {
     where: { buyerId: user!.id, photoId, licenseType, maxDownloads: { gt: 0 } },
     select: { id: true },
   });
-  if (owned) redirect(`/photos/${photoId}?error=Bạn đã sở hữu ảnh này với license này. Tải về trong Thư viện.`);
+  if (owned) redirectError(`/photos/${photoId}?error=Bạn đã sở hữu ảnh này với license này. Tải về trong Thư viện.`);
 
   await prisma.cartItem.upsert({
     where: { userId_photoId_licenseType: { userId: user!.id, photoId, licenseType } },
@@ -80,9 +81,9 @@ export async function reportPhotoAction(formData: FormData) {
       select: { id: true, sellerId: true, title: true, status: true },
     });
     if (!photo) redirect("/");
-    if (photo!.sellerId === user!.id) redirect(`/photos/${photoId}?error=Không thể khiếu nại ảnh của chính bạn`);
+    if (photo!.sellerId === user!.id) redirectError(`/photos/${photoId}?error=Không thể khiếu nại ảnh của chính bạn`);
     if (photo!.status !== "LIVE" && photo!.status !== "LOCKED") {
-      redirect(`/photos/${photoId}?error=Ảnh không ở trạng thái có thể khiếu nại`);
+      redirectError(`/photos/${photoId}?error=Ảnh không ở trạng thái có thể khiếu nại`);
     }
     const dup = await prisma.dmcaClaim.findFirst({
       where: { photoId, claimantId: user!.id, status: { in: ["OPEN", "COUNTERED"] } },

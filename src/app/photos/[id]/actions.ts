@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { redirectError } from "@/lib/nav";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
@@ -12,15 +13,15 @@ export async function submitReviewAction(formData: FormData) {
   const rating = Math.min(5, Math.max(1, parseInt(String(formData.get("rating") ?? "0"), 10)));
   const comment = String(formData.get("comment") ?? "").slice(0, 1000);
 
-  if (!rating) redirect(`/photos/${photoId}?error=Vui lòng chọn số sao`);
+  if (!rating) redirectError(`/photos/${photoId}?error=Vui lòng chọn số sao`);
 
   const photo = await prisma.photo.findUnique({ where: { id: photoId }, select: { id: true, sellerId: true } });
   if (!photo) redirect("/");
-  if (photo.sellerId === user.id) redirect(`/photos/${photoId}?error=Không thể tự đánh giá ảnh của mình`);
+  if (photo.sellerId === user.id) redirectError(`/photos/${photoId}?error=Không thể tự đánh giá ảnh của mình`);
 
   // điều kiện: đã sở hữu file (có DownloadGrant) -> đánh giá đã xác thực
   const owns = await prisma.downloadGrant.findFirst({ where: { buyerId: user.id, photoId } });
-  if (!owns) redirect(`/photos/${photoId}?error=Chỉ người đã mua/nhận ảnh mới được đánh giá`);
+  if (!owns) redirectError(`/photos/${photoId}?error=Chỉ người đã mua/nhận ảnh mới được đánh giá`);
 
   await prisma.$transaction(async (tx) => {
     const existing = await tx.review.findUnique({

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { redirectError } from "@/lib/nav";
 import Link from "next/link";
 import { Loader2, CheckCircle2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
@@ -30,7 +31,7 @@ export default async function BankPaymentPage({
 
   if (sp.order) {
     const order = await prisma.order.findFirst({ where: { id: sp.order, buyerId: user.id } });
-    if (!order) redirect("/cart?error=Đơn hàng không hợp lệ");
+    if (!order) redirectError("/cart?error=Đơn hàng không hợp lệ");
     if (order!.status === "PAID") redirect(`/payment/result?status=success&order=${order!.id}`);
     memo = order!.providerTxnRef ?? "";
     amountVnd = order!.totalVnd;
@@ -39,7 +40,7 @@ export default async function BankPaymentPage({
     hidden.value = order!.id;
   } else if (sp.sub) {
     const sub = await prisma.subscription.findFirst({ where: { id: sp.sub, userId: user.id } });
-    if (!sub) redirect("/subscription?error=Không hợp lệ");
+    if (!sub) redirectError("/subscription?error=Không hợp lệ");
     if (sub!.status === "ACTIVE") redirect("/subscription?activated=1");
     memo = sub!.providerTxnRef ?? "";
     amountVnd = sub!.priceVnd;
