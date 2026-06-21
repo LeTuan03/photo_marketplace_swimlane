@@ -181,7 +181,6 @@ export async function resolveDisputeAction(formData: FormData) {
   await requireRole("ADMIN");
   const disputeId = String(formData.get("disputeId") ?? "");
   const decision = String(formData.get("decision") ?? "");
-  const formItemId = String(formData.get("orderItemId") ?? "");
   const percent = Math.min(100, Math.max(1, parseInt(String(formData.get("percent") ?? "100"), 10) || 100));
 
   const dispute = await prisma.dispute.findUnique({ where: { id: disputeId } });
@@ -189,11 +188,17 @@ export async function resolveDisputeAction(formData: FormData) {
   // claw-back nhiều lần, +penaltyPoint nhiều lần, gỡ ảnh lặp lại.
   if (!dispute || dispute.status !== "OPEN") redirect("/admin/disputes");
 
-  // Ưu tiên item đã gắn chính xác lúc tạo tranh chấp; fallback item suy đoán từ trang.
-  const orderItemId = dispute!.orderItemId ?? formItemId;
+  // CHỈ dùng đúng giao dịch đã gắn lúc người mua tạo tranh chấp (dispute.orderItemId).
+  // Trước đây fallback "đơn mua mới nhất của ảnh" -> nếu người tố cáo KHÔNG mua ảnh
+  // (orderItemId=null) sẽ hoàn nhầm cho một người mua khác. Nếu không có giao dịch
+  // gắn kèm thì không thể auto-hoàn -> báo admin xử lý thủ công.
+  const orderItemId = dispute!.orderItemId;
 
   if (decision === "refund") {
-    if (orderItemId) await refundOrderItem(orderItemId, dispute!.reason, percent);
+    if (!orderItemId) {
+      redirectError("/admin/disputes?error=Khiếu nại này không gắn với giao dịch mua nào nên không thể tự động hoàn tiền. Hãy đối chiếu thủ công.");
+    }
+    await refundOrderItem(orderItemId!, dispute!.reason, percent);
     // gỡ ảnh nếu là DMCA
     if (dispute!.reason === "DMCA" && dispute!.photoId) {
       await prisma.photo.update({ where: { id: dispute!.photoId }, data: { status: "REMOVED" } });
@@ -251,8 +256,13 @@ export async function confirmBankPaymentAction(formData: FormData) {
   const txnId = `BANK-MANUAL-${admin.id.slice(-6)}`;
 
   if (kind === "sub") {
-    const sub = await prisma.subscription.findUnique({ where: { id } });
-    if (sub && sub.status === "PENDING") await activateSubscription(sub.id, txnId);
+    // CHỈ kích hoạt thủ công gói dùng cổng chuyển khoản (BANKQR). Gói qua PayOS/VNPay/MoMo
+    // tự xác nhận bằng webhook — nếu cho xác nhận thủ công thì admin có thể kích hoạt
+    // khống gói CHƯA trả qua cổng (parity với đơn hàng).
+    const sub = await prisma.subscription.findFirst({
+      where: { id, status: "PENDING", paymentProvider: "BANKQR" },
+    });
+    if (sub) await activateSubscription(sub.id, txnId);
   } else {
     // CHỈ xác nhận thủ công đơn dùng cổng chuyển khoản (BANKQR). Trước đây fetch theo
     // id + status PENDING nên admin có thể "đã nhận tiền" cho đơn VNPay/MoMo CHƯA trả
@@ -273,12 +283,41 @@ export async function rejectBankPaymentAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
 
   if (kind === "sub") {
-    await prisma.subscription.updateMany({ where: { id, status: "PENDING" }, data: { status: "CANCELLED" } });
+    await prisma.subscription.updateMany({ where: { id, status: "PENDING", paymentProvider: "BANKQR" }, data: { status: "CANCELLED" } });
   } else {
-    await prisma.order.updateMany({ where: { id, status: "PENDING" }, data: { status: "FAILED" } });
+    await prisma.order.updateMany({ where: { id, status: "PENDING", paymentProvider: "BANKQR" }, data: { status: "FAILED" } });
   }
   revalidatePath("/admin/payments");
   redirect("/admin/payments");
+}
+
+/**
+ * TT5: admin đánh dấu ĐÃ CHI khoản hoàn tiền cho người mua (sau khi chuyển khoản/hoàn
+ * qua cổng ngoài hệ thống). Giành nguyên tử PENDING -> SETTLED để không thông báo trùng.
+ */
+export async function settleRefundAction(formData: FormData) {
+  await requireRole("ADMIN");
+  const id = String(formData.get("id") ?? "");
+  const note = String(formData.get("note") ?? "").slice(0, 200);
+  const rec = await prisma.refundRecord.findUnique({ where: { id } });
+  if (!rec || rec.status !== "PENDING") redirect("/admin/refunds");
+
+  const claimed = await prisma.refundRecord.updateMany({
+    where: { id, status: "PENDING" },
+    data: { status: "SETTLED", settledAt: new Date(), note: note || null },
+  });
+  if (claimed.count > 0) {
+    await notify({
+      userId: rec!.buyerId,
+      type: "REFUND_DONE",
+      title: "Đã hoàn tiền cho bạn",
+      body: `Khoản hoàn ${formatVnd(rec!.amountVnd)} đã được chuyển cho bạn.`,
+      link: "/library",
+      email: true,
+    });
+  }
+  revalidatePath("/admin/refunds");
+  redirect("/admin/refunds");
 }
 
 /** TT6: admin xử lý yêu cầu rút tiền (đánh dấu đã chi / từ chối hoàn tiền vào ví). */
@@ -290,26 +329,36 @@ export async function processPayoutAction(formData: FormData) {
   if (!payout || payout.status !== "REQUESTED") redirect("/admin/payouts");
 
   if (action === "pay") {
-    await prisma.payout.update({
-      where: { id: payoutId },
+    // "Giành" payout nguyên tử REQUESTED -> PAID. Double-submit/đua không tạo
+    // được 2 lần PAID + 2 thông báo.
+    const claimed = await prisma.payout.updateMany({
+      where: { id: payoutId, status: "REQUESTED" },
       data: { status: "PAID", processedAt: new Date() },
     });
-    await notify({
-      userId: payout.sellerId,
-      type: "PAYOUT_RELEASED",
-      title: "Đã chi trả rút tiền",
-      body: `Yêu cầu rút ${formatVnd(payout.amountVnd)} đã được chi trả qua ${payout.method}.`,
-      link: "/seller/earnings",
-      email: true,
-    });
+    if (claimed.count > 0) {
+      await notify({
+        userId: payout.sellerId,
+        type: "PAYOUT_RELEASED",
+        title: "Đã chi trả rút tiền",
+        body: `Yêu cầu rút ${formatVnd(payout.amountVnd)} đã được chi trả qua ${payout.method}.`,
+        link: "/seller/earnings",
+        email: true,
+      });
+    }
   } else if (action === "reject") {
-    // hoàn tiền lại vào ví người bán
+    // hoàn tiền lại vào ví người bán — "GIÀNH" payout nguyên tử REQUESTED -> REJECTED
+    // TRƯỚC khi cộng tiền. Trước đây tx.payout.update vô điều kiện -> 2 request từ chối
+    // song song (double-click) cùng cộng tiền = ví người bán bị cộng đôi 1 payout.
     await prisma.$transaction(async (tx) => {
+      const claimed = await tx.payout.updateMany({
+        where: { id: payoutId, status: "REQUESTED" },
+        data: { status: "REJECTED", processedAt: new Date() },
+      });
+      if (claimed.count === 0) return; // luồng khác đã xử lý -> không cộng tiền trùng
       const u = await tx.user.update({
         where: { id: payout.sellerId },
         data: { balanceVnd: { increment: payout.amountVnd } },
       });
-      await tx.payout.update({ where: { id: payoutId }, data: { status: "REJECTED", processedAt: new Date() } });
       await tx.walletTransaction.create({
         data: {
           userId: payout.sellerId,

@@ -26,7 +26,11 @@ export default async function LibraryPage({
 
   return (
     <div>
-      <PageHeader title="Thư viện của tôi" subtitle="Ảnh đã mua, certificate license và lượt tải còn lại." />
+      <PageHeader
+        title="Thư viện của tôi"
+        subtitle="Ảnh đã mua, certificate license và lượt tải còn lại."
+        action={<Link href="/orders" className="btn-outline">Lịch sử mua</Link>}
+      />
       {sp.error && <div className="mb-4"><Alert kind="error">{decodeURIComponent(sp.error)}</Alert></div>}
 
       {grants.length === 0 ? (

@@ -26,6 +26,8 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/seller") ||
     pathname.startsWith("/admin") ||
     pathname.startsWith("/library") ||
+    pathname.startsWith("/orders") ||
+    pathname.startsWith("/profile") ||
     pathname.startsWith("/cart") ||
     pathname.startsWith("/checkout") ||
     pathname.startsWith("/notifications") ||
@@ -57,6 +59,8 @@ export const config = {
     "/seller/:path*",
     "/admin/:path*",
     "/library/:path*",
+    "/orders/:path*",
+    "/profile/:path*",
     "/cart/:path*",
     "/checkout/:path*",
     "/notifications/:path*",

@@ -19,7 +19,7 @@ export default async function AdminPaymentsPage() {
       include: { buyer: { select: { email: true, name: true } }, items: true },
     }),
     prisma.subscription.findMany({
-      where: { status: "PENDING" },
+      where: { status: "PENDING", paymentProvider: "BANKQR" },
       orderBy: { createdAt: "desc" },
       take: 100,
       include: { user: { select: { email: true, name: true } } },

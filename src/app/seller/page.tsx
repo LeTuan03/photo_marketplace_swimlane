@@ -47,7 +47,10 @@ export default async function SellerDashboard() {
         <StatCard label="Số dư rút được" value={formatVnd(user.balanceVnd)} hint="Ví khả dụng" />
       </div>
 
-      <h2 className="mb-3 mt-8 font-semibold text-gray-900">Giao dịch gần đây</h2>
+      <div className="mb-3 mt-8 flex items-center justify-between">
+        <h2 className="font-semibold text-gray-900">Giao dịch gần đây</h2>
+        <Link href="/seller/sales" className="text-sm font-medium text-brand-700 hover:underline">Xem tất cả →</Link>
+      </div>
       {recentItems.length === 0 ? (
         <div className="card p-6 text-sm text-gray-500">Chưa có giao dịch nào.</div>
       ) : (

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, Upload, Images, Wallet } from "lucide-react";
+import { LayoutDashboard, Upload, Images, Wallet, Receipt } from "lucide-react";
 import { requireRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +8,7 @@ const nav = [
   { href: "/seller", label: "Tổng quan", icon: LayoutDashboard },
   { href: "/seller/upload", label: "Đăng ảnh", icon: Upload },
   { href: "/seller/inventory", label: "Kho ảnh", icon: Images },
+  { href: "/seller/sales", label: "Lịch sử bán", icon: Receipt },
   { href: "/seller/earnings", label: "Thu nhập", icon: Wallet },
 ];
 

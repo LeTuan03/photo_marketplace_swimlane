@@ -12,6 +12,33 @@ export function splitPrice(priceVnd: number, rate: number) {
 }
 
 /**
+ * Cảnh báo admin khi cổng báo ĐÃ NHẬN TIỀN nhưng số tiền LỆCH với đơn/gói (trả thiếu/thừa
+ * hoặc giá đổi giữa lúc tạo đơn và lúc trả). Trước đây các webhook bỏ qua âm thầm -> tiền
+ * vào nhưng đơn kẹt PENDING, không fulfill, không hoàn, không ai biết. Đây là alert in-app
+ * (không email) để admin vào đối chiếu/hoàn thủ công.
+ */
+export async function flagPaymentMismatch(args: {
+  kind: "order" | "sub";
+  refId: string;
+  provider: string;
+  expectedVnd: number;
+  paidVnd: number;
+  txnId?: string;
+}): Promise<void> {
+  const label = args.kind === "order" ? "Đơn" : "Gói";
+  const txnPart = args.txnId ? ` (mã GD ${args.txnId})` : "";
+  try {
+    await notifyAdmins(
+      "⚠️ Thanh toán LỆCH số tiền cần xử lý",
+      `${label} ${args.refId} qua ${args.provider}: cần ${formatVnd(args.expectedVnd)} nhưng nhận ${formatVnd(args.paidVnd)}${txnPart}. Tiền đã vào nhưng KHÔNG khớp — kiểm tra & hoàn/đối soát thủ công.`,
+      "/admin/payments",
+    );
+  } catch (err) {
+    console.error("flagPaymentMismatch error:", err);
+  }
+}
+
+/**
  * Hoàn tất một đơn đã thanh toán (TT3): chuyển PAID, tạo escrow giữ 7 ngày,
  * cấp quyền tải (DownloadGrant) + certificate, bắn thông báo N3/N4.
  * Idempotent: gọi lại trên đơn đã PAID sẽ không tạo trùng.
@@ -75,33 +102,40 @@ export async function fulfillPaidOrder(orderId: string, providerTxnId?: string):
 
   if (!didFulfill) return; // không phải luồng thắng -> không bắn thông báo trùng
 
-  // Thông báo (ngoài transaction)
-  await notify({
-    userId: order.buyerId,
-    type: "PURCHASE_OK",
-    title: "Mua ảnh thành công",
-    body: `Đơn hàng ${order.id.slice(-8).toUpperCase()} đã thanh toán thành công. Bạn có thể tải file gốc và xem certificate trong Thư viện.`,
-    link: "/library",
-    email: true,
-  });
-
-  // N3: thông báo từng người bán
-  const bySeller = new Map<string, typeof order.items>();
-  for (const it of order.items) {
-    const arr = bySeller.get(it.sellerId) ?? [];
-    arr.push(it);
-    bySeller.set(it.sellerId, arr);
-  }
-  for (const [sellerId, items] of bySeller) {
-    const total = items.reduce((s, i) => s + i.sellerEarningVnd, 0);
+  // notify là best-effort: tiền/escrow/grant đã commit an toàn trong transaction. Nếu
+  // gửi thông báo ném lỗi, KHÔNG để webhook trả 500 (retry sẽ early-return vì đơn đã
+  // PAID -> mất luôn thông báo). Bọc try/catch để bảo toàn fulfillment.
+  try {
+    // Thông báo (ngoài transaction)
     await notify({
-      userId: sellerId,
-      type: "PHOTO_SOLD",
-      title: "Có người mua ảnh của bạn",
-      body: `${items.length} ảnh vừa được bán. Doanh thu ghi nhận (sau phí): ${formatVnd(total)} — đang giữ trong escrow ${env.rules.escrowHoldDays} ngày.`,
-      link: "/seller/earnings",
+      userId: order.buyerId,
+      type: "PURCHASE_OK",
+      title: "Mua ảnh thành công",
+      body: `Đơn hàng ${order.id.slice(-8).toUpperCase()} đã thanh toán thành công. Bạn có thể tải file gốc và xem certificate trong Thư viện.`,
+      link: "/library",
       email: true,
     });
+
+    // N3: thông báo từng người bán
+    const bySeller = new Map<string, typeof order.items>();
+    for (const it of order.items) {
+      const arr = bySeller.get(it.sellerId) ?? [];
+      arr.push(it);
+      bySeller.set(it.sellerId, arr);
+    }
+    for (const [sellerId, items] of bySeller) {
+      const total = items.reduce((s, i) => s + i.sellerEarningVnd, 0);
+      await notify({
+        userId: sellerId,
+        type: "PHOTO_SOLD",
+        title: "Có người mua ảnh của bạn",
+        body: `${items.length} ảnh vừa được bán. Doanh thu ghi nhận (sau phí): ${formatVnd(total)} — đang giữ trong escrow ${env.rules.escrowHoldDays} ngày.`,
+        link: "/seller/earnings",
+        email: true,
+      });
+    }
+  } catch (err) {
+    console.error("fulfillPaidOrder notify error:", err);
   }
 }
 
@@ -179,9 +213,17 @@ export async function refundOrderItem(orderItemId: string, reason: string, perce
   });
   if (!item) throw new Error("ITEM_NOT_FOUND");
 
-  const buyerRefund = Math.round((item.priceVnd * pct) / 100);
+  // Tiền hoàn cho người mua tính theo SỐ TIỀN THỰC TRẢ cho item (đã trừ phần giảm giá
+  // phân bổ theo tỉ lệ), không phải giá niêm yết — tránh hoàn vượt khi đơn có coupon.
+  const paidForItem =
+    item.order.subtotalVnd > 0
+      ? Math.round((item.priceVnd * item.order.totalVnd) / item.order.subtotalVnd)
+      : item.priceVnd;
+  const buyerRefund = Math.round((paidForItem * pct) / 100);
   const sellerKeep = Math.round((item.sellerEarningVnd * (100 - pct)) / 100);
-  const clawback = item.sellerEarningVnd - sellerKeep;
+  // Số phần người bán phải trả lại không bao giờ vượt số thực đang/đã nắm trong escrow
+  // (escrow.amountVnd có thể đã bị giảm bởi lần hoàn một phần trước đó).
+  const clawback = Math.min(item.sellerEarningVnd - sellerKeep, item.escrow?.amountVnd ?? 0);
 
   // Trả về false nếu KHÔNG có gì để hoàn (đã hoàn trước đó) -> không bắn thông báo trùng.
   const applied = await prisma.$transaction(async (tx) => {
@@ -196,11 +238,11 @@ export async function refundOrderItem(orderItemId: string, reason: string, perce
           });
           if (c.count === 0) return false; // luồng khác đã hoàn
         } else {
-          // Hoàn một phần: giảm phần escrow xuống đúng phần người bán được giữ,
-          // mở băng về HELD để giải ngân bình thường phần còn lại.
+          // Hoàn một phần: giảm phần escrow xuống đúng phần người bán được giữ (không
+          // vượt số đang giữ), mở băng về HELD để giải ngân bình thường phần còn lại.
           const c = await tx.escrowHold.updateMany({
             where: { id: item.escrow.id, status: { in: ["HELD", "FROZEN"] } },
-            data: { amountVnd: sellerKeep, status: "HELD" },
+            data: { amountVnd: Math.min(sellerKeep, item.escrow.amountVnd), status: "HELD" },
           });
           if (c.count === 0) return false;
         }
@@ -238,18 +280,42 @@ export async function refundOrderItem(orderItemId: string, reason: string, perce
     if (full) {
       await tx.downloadGrant.updateMany({ where: { orderItemId: item.id }, data: { maxDownloads: 0 } });
     }
+
+    // Ghi sổ NỢ hoàn tiền cho người mua: hệ thống không giữ ví người mua nên tiền hoàn
+    // được chi ngoài hệ thống/qua cổng. Bản ghi này là nguồn đối soát + nơi admin đánh
+    // dấu đã chi ở /admin/refunds (atomic cùng việc điều chỉnh phía người bán).
+    await tx.refundRecord.create({
+      data: {
+        orderItemId: item.id,
+        buyerId: item.order.buyerId,
+        amountVnd: buyerRefund,
+        percent: pct,
+        reason,
+        status: "PENDING",
+      },
+    });
     return true;
   });
 
   if (!applied) return;
 
-  await notify({
-    userId: item.order.buyerId,
-    type: "REFUND_DONE",
-    title: full ? "Hoàn tiền toàn bộ" : "Hoàn tiền một phần",
-    body: `Bạn được hoàn ${formatVnd(buyerRefund)} (${pct}%) cho 1 ảnh. Lý do: ${reason}.`,
-    link: "/library",
-    email: true,
-  });
-  await notifyAdmins("Đã hoàn tiền 1 giao dịch", `Item ${orderItemId} — hoàn ${pct}% (${formatVnd(buyerRefund)}) — ${reason}`);
+  // notify là best-effort: lỗi gửi thông báo KHÔNG được làm hỏng giao dịch hoàn tiền đã
+  // commit (nếu ném, webhook/cron retry sẽ early-return vì escrow đã REFUNDED -> mất notify).
+  try {
+    await notify({
+      userId: item.order.buyerId,
+      type: "REFUND_DONE",
+      title: full ? "Hoàn tiền toàn bộ" : "Hoàn tiền một phần",
+      body: `Khoản hoàn ${formatVnd(buyerRefund)} (${pct}%) cho 1 ảnh đã được DUYỆT và sẽ được chuyển cho bạn trong thời gian sớm nhất. Lý do: ${reason}.`,
+      link: "/library",
+      email: true,
+    });
+    await notifyAdmins(
+      "Đã duyệt hoàn tiền — chờ chi cho người mua",
+      `Item ${orderItemId} — hoàn ${pct}% (${formatVnd(buyerRefund)}). Lý do: ${reason}. Vào /admin/refunds để đánh dấu đã chi.`,
+      "/admin/refunds",
+    );
+  } catch (err) {
+    console.error("refundOrderItem notify error:", err);
+  }
 }

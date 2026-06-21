@@ -1,8 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { extractTxnRef, verifyWebhookAuth } from "@/lib/bankqr";
-import { fulfillPaidOrder } from "@/lib/commerce";
-import { activateSubscription } from "@/lib/subscription";
+import { confirmGatewayPayment } from "@/lib/payment-confirm";
 
 /**
  * Webhook SePay (server-to-server, POST JSON) khi có tiền VÀO tài khoản ngân hàng.
@@ -32,18 +30,14 @@ export async function POST(req: NextRequest) {
   const txnRef = extractTxnRef(content);
   if (!txnRef) return NextResponse.json({ success: true }); // không nhận diện được mã -> bỏ qua
 
-  const order = await prisma.order.findUnique({ where: { providerTxnRef: txnRef } });
-  if (order) {
-    // Đúng số tiền & chưa xử lý -> xác nhận (fulfillPaidOrder idempotent + atomic)
-    if (amount === order.totalVnd && order.status !== "PAID") {
-      await fulfillPaidOrder(order.id, refCode);
-    }
-    return NextResponse.json({ success: true });
-  }
-
-  const sub = await prisma.subscription.findUnique({ where: { providerTxnRef: txnRef } });
-  if (sub && amount === sub.priceVnd && sub.status !== "ACTIVE") {
-    await activateSubscription(sub.id, refCode);
-  }
+  // Tiền ĐÃ VÀO tài khoản nên success=true; nếu lệch số tiền, helper sẽ cảnh báo admin
+  // thay vì im lặng bỏ qua (trước đây tiền vào sai số -> đơn kẹt PENDING, không ai biết).
+  await confirmGatewayPayment({
+    txnRef,
+    paidVnd: amount,
+    success: true,
+    provider: "BANKQR/SePay",
+    txnId: refCode,
+  });
   return NextResponse.json({ success: true });
 }

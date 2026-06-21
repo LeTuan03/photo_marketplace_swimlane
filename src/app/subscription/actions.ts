@@ -49,16 +49,19 @@ export async function subscribeAction(formData: FormData) {
   if (bankConfigured()) {
     const txnRef = makeTxnRef();
     const sub = await prisma.subscription.create({
-      data: { userId: user.id, plan, status: "PENDING", priceVnd: price, providerTxnRef: txnRef },
+      data: { userId: user.id, plan, status: "PENDING", priceVnd: price, providerTxnRef: txnRef, paymentProvider: "BANKQR" },
     });
     redirect(`/payment/bank?sub=${sub.id}`);
   }
 
   // PayOS dùng orderCode dạng số; cổng khác dùng chuỗi PIC...
+  // Ghi rõ cổng khởi tạo: chỉ BANKQR mới được admin xác nhận thủ công ở /admin/payments
+  // (gói qua PayOS/VNPay tự xác nhận bằng webhook — không cho admin kích hoạt khống).
   const orderCode = payosConfigured() ? makeOrderCode() : null;
   const txnRef = orderCode === null ? makeTxnRef() : String(orderCode);
+  const provider = orderCode !== null ? "PAYOS" : isConfigured() ? "VNPAY" : "MOCK";
   const sub = await prisma.subscription.create({
-    data: { userId: user.id, plan, status: "PENDING", priceVnd: price, providerTxnRef: txnRef },
+    data: { userId: user.id, plan, status: "PENDING", priceVnd: price, providerTxnRef: txnRef, paymentProvider: provider },
   });
 
   // PayOS (VietQR) — cổng chính

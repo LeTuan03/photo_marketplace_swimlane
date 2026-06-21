@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Camera, Upload, ShoppingCart, LayoutDashboard, Shield, LogOut, Library, Bell, ArrowLeftRight, Sparkles, Heart } from "lucide-react";
+import { Camera, Upload, ShoppingCart, LayoutDashboard, Shield, LogOut, Library, Bell, ArrowLeftRight, Sparkles, Heart, Receipt, UserCircle } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logoutAction } from "@/app/(auth)/actions";
@@ -59,6 +59,9 @@ export async function Navbar() {
               <Link href="/wishlist" className="hidden items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 lg:flex">
                 <Heart className="h-4 w-4" /> Yêu thích
               </Link>
+              <Link href="/orders" className="hidden items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 lg:flex">
+                <Receipt className="h-4 w-4" /> Đơn mua
+              </Link>
               <Link href="/library" className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">
                 <Library className="h-4 w-4" /> Thư viện
               </Link>
@@ -81,7 +84,10 @@ export async function Navbar() {
                   </span>
                 )}
               </Link>
-              <span className="ml-2 hidden text-sm text-gray-500 md:inline">{user.name}</span>
+              <Link href="/profile" className="ml-1 flex items-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100" title="Tài khoản">
+                <UserCircle className="h-5 w-5" />
+                <span className="hidden md:inline">{user.name}</span>
+              </Link>
               <form action={logoutAction}>
                 <button className="rounded-lg p-2 text-gray-500 hover:bg-gray-100" title="Đăng xuất">
                   <LogOut className="h-5 w-5" />

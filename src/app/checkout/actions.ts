@@ -155,6 +155,8 @@ export async function createOrderAndPayAction(formData: FormData) {
       await prisma.order.update({ where: { id: order.id }, data: { payUrl } });
       redirect(payUrl); // redirect ngoài try/catch
     }
+    // Tạo link thất bại -> đánh dấu FAILED để không để đơn PENDING mồ côi (giỏ đã xóa).
+    await prisma.order.updateMany({ where: { id: order.id, status: "PENDING" }, data: { status: "FAILED" } });
     redirectError("/checkout?error=Không tạo được giao dịch MoMo, thử lại hoặc đổi cổng");
   }
 
@@ -176,6 +178,7 @@ export async function createOrderAndPayAction(formData: FormData) {
       await prisma.order.update({ where: { id: order.id }, data: { payUrl } });
       redirect(payUrl); // redirect ngoài try/catch
     }
+    await prisma.order.updateMany({ where: { id: order.id, status: "PENDING" }, data: { status: "FAILED" } });
     redirectError("/checkout?error=Không tạo được giao dịch PayOS, thử lại hoặc đổi cổng");
   }
 
@@ -183,5 +186,8 @@ export async function createOrderAndPayAction(formData: FormData) {
   if (mockGatewayEnabled()) {
     redirect(`/payment/mock?order=${order.id}`);
   }
+  // Không có cổng khả dụng (vd: provider được chọn chưa cấu hình & prod) -> không để
+  // đơn PENDING mồ côi.
+  await prisma.order.updateMany({ where: { id: order.id, status: "PENDING" }, data: { status: "FAILED" } });
   redirectError("/checkout?error=Chưa cấu hình cổng thanh toán, vui lòng liên hệ quản trị");
 }

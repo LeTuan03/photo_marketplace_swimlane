@@ -84,6 +84,11 @@ enum DisputeStatus {
   RESOLVED_REJECT
 }
 
+enum RefundStatus {
+  PENDING // đã duyệt hoàn cho người mua, CHỜ chuyển tiền (settle thủ công/qua cổng)
+  SETTLED // đã chuyển tiền hoàn cho người mua
+}
+
 enum NotificationType {
   PHOTO_APPROVED // N1
   PHOTO_REJECTED // N2
@@ -189,6 +194,7 @@ model User {
   reviewsReceived Review[]       @relation("SellerReviews")
   wishlist        WishlistItem[]
   dmcaClaims      DmcaClaim[]    @relation("DmcaClaimant")
+  refundsReceived RefundRecord[] @relation("BuyerRefunds")
 
   @@index([role])
 }
@@ -337,6 +343,7 @@ model OrderItem {
 
   escrow   EscrowHold?
   download DownloadGrant?
+  refunds  RefundRecord[]
 
   @@index([sellerId])
   @@index([orderId])
@@ -428,6 +435,28 @@ model Dispute {
   @@index([status])
 }
 
+// Sổ ghi nợ hoàn tiền cho NGƯỜI MUA (TT5). Hệ thống không giữ ví người mua nên việc
+// chi tiền hoàn thực hiện ngoài hệ thống/qua cổng — bản ghi này là nguồn ĐỐI SOÁT
+// "đang nợ người mua bao nhiêu" + nơi admin đánh dấu đã chi (SETTLED).
+model RefundRecord {
+  id          String       @id @default(cuid())
+  orderItem   OrderItem    @relation(fields: [orderItemId], references: [id])
+  orderItemId String
+  buyer       User         @relation("BuyerRefunds", fields: [buyerId], references: [id])
+  buyerId     String
+  amountVnd   Int
+  percent     Int
+  reason      String       @default("")
+  status      RefundStatus @default(PENDING)
+  note        String?
+  settledAt   DateTime?
+  createdAt   DateTime     @default(now())
+
+  @@index([status])
+  @@index([buyerId])
+  @@index([orderItemId])
+}
+
 model Notification {
   id        String           @id @default(cuid())
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -481,6 +510,10 @@ model Subscription {
   status           SubscriptionStatus @default(PENDING)
   priceVnd         Int
   autoRenew        Boolean            @default(true)
+  // Cổng khởi tạo gói (BANKQR | PAYOS | VNPAY | MOMO | MOCK). Bắt buộc để xác nhận
+  // thủ công ở /admin/payments CHỈ áp cho BANKQR — chống admin "đã nhận tiền" cho
+  // gói do cổng tự xác nhận (chưa trả) -> kích hoạt khống (parity với Order).
+  paymentProvider  String?
   providerTxnRef   String?            @unique
   startedAt        DateTime?
   currentPeriodEnd DateTime?

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { resolveDisputeAction } from "../actions";
 import { SubmitButton } from "@/components/SubmitButton";
-import { PageHeader, EmptyState } from "@/components/ui";
+import { PageHeader, EmptyState, Alert } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +14,13 @@ const reasonLabel: Record<string, string> = {
   OTHER: "Khác",
 };
 
-export default async function DisputesPage() {
+export default async function DisputesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
   await requireRole("ADMIN");
+  const sp = await searchParams;
 
   const disputes = await prisma.dispute.findMany({
     orderBy: [{ status: "asc" }, { createdAt: "desc" }],
@@ -23,19 +28,11 @@ export default async function DisputesPage() {
     include: { photo: { select: { id: true, title: true } } },
   });
 
-  // tìm orderItem gần nhất của ảnh để hoàn tiền (nếu có)
-  const photoIds = disputes.map((d) => d.photoId).filter(Boolean) as string[];
-  const latestItems = await prisma.orderItem.findMany({
-    where: { photoId: { in: photoIds }, order: { status: "PAID" } },
-    orderBy: { createdAt: "desc" },
-    select: { id: true, photoId: true },
-  });
-  const itemByPhoto = new Map<string, string>();
-  for (const it of latestItems) if (!itemByPhoto.has(it.photoId)) itemByPhoto.set(it.photoId, it.id);
-
   return (
     <div>
       <PageHeader title="Tranh chấp & Báo cáo" subtitle="Xử lý khiếu nại, file lỗi, DMCA (AD7/AD8)." />
+
+      {sp.error && <div className="mb-4"><Alert kind="error">{decodeURIComponent(sp.error)}</Alert></div>}
 
       {disputes.length === 0 ? (
         <EmptyState title="Không có tranh chấp nào" />
@@ -43,7 +40,8 @@ export default async function DisputesPage() {
         <div className="space-y-3">
           {disputes.map((d) => {
             const open = d.status === "OPEN";
-            const orderItemId = d.photoId ? itemByPhoto.get(d.photoId) ?? "" : "";
+            // CHỈ hoàn được khi tranh chấp gắn đúng giao dịch của người khiếu nại.
+            const refundable = Boolean(d.orderItemId);
             return (
               <div key={d.id} className="card p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
@@ -61,17 +59,20 @@ export default async function DisputesPage() {
                 {d.detail && <p className="mt-2 text-gray-600">{d.detail}</p>}
 
                 {open && (
-                  <div className="mt-3 flex gap-2">
-                    <form action={resolveDisputeAction} className="flex items-center gap-2">
-                      <input type="hidden" name="disputeId" value={d.id} />
-                      <input type="hidden" name="orderItemId" value={orderItemId} />
-                      <input type="hidden" name="decision" value="refund" />
-                      <div className="flex items-center gap-1">
-                        <input name="percent" type="number" min={1} max={100} defaultValue={100} className="input w-20 text-right" title="% hoàn" />
-                        <span className="text-xs text-gray-500">%</span>
-                      </div>
-                      <SubmitButton className="btn-danger">Hoàn tiền người mua</SubmitButton>
-                    </form>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {refundable ? (
+                      <form action={resolveDisputeAction} className="flex items-center gap-2">
+                        <input type="hidden" name="disputeId" value={d.id} />
+                        <input type="hidden" name="decision" value="refund" />
+                        <div className="flex items-center gap-1">
+                          <input name="percent" type="number" min={1} max={100} defaultValue={100} className="input w-20 text-right" title="% hoàn" />
+                          <span className="text-xs text-gray-500">%</span>
+                        </div>
+                        <SubmitButton className="btn-danger">Hoàn tiền người mua</SubmitButton>
+                      </form>
+                    ) : (
+                      <span className="text-xs text-gray-400">Không gắn giao dịch mua — không thể tự hoàn tiền (đối chiếu thủ công).</span>
+                    )}
                     <form action={resolveDisputeAction}>
                       <input type="hidden" name="disputeId" value={d.id} />
                       <input type="hidden" name="decision" value="reject" />

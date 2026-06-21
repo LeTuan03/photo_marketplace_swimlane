@@ -120,14 +120,28 @@ export async function reportPhotoAction(formData: FormData) {
     orderBy: { createdAt: "desc" },
     include: { escrow: true },
   });
-  await prisma.$transaction(async (tx) => {
+  const froze = await prisma.$transaction(async (tx) => {
     await tx.dispute.create({
       data: { photoId, orderItemId: myItem?.id ?? null, raisedById: user!.id, reason, detail, status: "OPEN" },
     });
     if (myItem?.escrow && myItem.escrow.status === "HELD") {
       await tx.escrowHold.update({ where: { id: myItem.escrow.id }, data: { status: "FROZEN" } });
+      return true;
     }
+    return false;
   });
+  // Minh bạch cho người bán: khi escrow bị tạm giữ do khiếu nại, báo để họ biết vì sao
+  // khoản "đang giữ" giảm đi (trước đây tiền biến mất khỏi tổng escrow mà không lời nào).
+  if (froze && myItem) {
+    await notify({
+      userId: myItem.sellerId,
+      type: "GENERIC",
+      title: "Một khoản escrow đang được tạm giữ",
+      body: "Một giao dịch của bạn đang bị khiếu nại nên khoản tiền tương ứng được tạm giữ tới khi quản trị viên xử lý.",
+      link: "/seller/earnings",
+      email: false,
+    });
+  }
   await notifyAdmins(
     "Có báo cáo mới về ảnh",
     `Lý do: ${reason}. ${detail}`,

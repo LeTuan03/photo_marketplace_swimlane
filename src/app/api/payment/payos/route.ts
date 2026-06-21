@@ -1,13 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { verifyWebhookData, isPaymentSuccess, type PayosWebhook } from "@/lib/payos";
-import { fulfillPaidOrder } from "@/lib/commerce";
-import { activateSubscription } from "@/lib/subscription";
+import { confirmGatewayPayment } from "@/lib/payment-confirm";
 
 /**
  * Webhook PayOS (server-to-server, POST JSON) — nguồn xác nhận đáng tin cậy duy nhất.
  * PayOS sẽ retry tới khi nhận HTTP 200. Trả {success:true} để PayOS chấp nhận
  * (kể cả ping kiểm tra khi đăng ký webhook -> không khớp đơn vẫn trả 200).
+ * Lệch số tiền -> confirmGatewayPayment cảnh báo admin (không fulfill khống).
  */
 export async function POST(req: NextRequest) {
   let body: PayosWebhook;
@@ -22,23 +21,12 @@ export async function POST(req: NextRequest) {
   }
 
   const data = body.data!;
-  const orderCode = String(data.orderCode);
-  const paidAmount = Number(data.amount);
-  const success = isPaymentSuccess(body);
-  const txnId = String(data.reference ?? data.paymentLinkId ?? "");
-
-  const order = await prisma.order.findUnique({ where: { providerTxnRef: orderCode } });
-  if (order) {
-    if (paidAmount === order.totalVnd && order.status !== "PAID") {
-      if (success) await fulfillPaidOrder(order.id, txnId); // idempotent (atomic claim)
-      else await prisma.order.update({ where: { id: order.id }, data: { status: "FAILED" } });
-    }
-    return NextResponse.json({ success: true });
-  }
-
-  const sub = await prisma.subscription.findUnique({ where: { providerTxnRef: orderCode } });
-  if (sub && success && paidAmount === sub.priceVnd && sub.status !== "ACTIVE") {
-    await activateSubscription(sub.id, txnId);
-  }
+  await confirmGatewayPayment({
+    txnRef: String(data.orderCode),
+    paidVnd: Number(data.amount),
+    success: isPaymentSuccess(body),
+    provider: "PAYOS",
+    txnId: String(data.reference ?? data.paymentLinkId ?? ""),
+  });
   return NextResponse.json({ success: true });
 }

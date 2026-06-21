@@ -16,9 +16,10 @@ export default async function EarningsPage({
   const user = await requireRole("SELLER", "ADMIN");
   const sp = await searchParams;
 
-  const [held, releasedAgg, holds, payouts, txns] = await Promise.all([
+  const [held, releasedAgg, frozenAgg, holds, payouts, txns] = await Promise.all([
     prisma.escrowHold.aggregate({ where: { sellerId: user.id, status: "HELD" }, _sum: { amountVnd: true } }),
     prisma.escrowHold.aggregate({ where: { sellerId: user.id, status: "RELEASED" }, _sum: { amountVnd: true } }),
+    prisma.escrowHold.aggregate({ where: { sellerId: user.id, status: "FROZEN" }, _sum: { amountVnd: true } }),
     prisma.escrowHold.findMany({
       where: { sellerId: user.id, status: "HELD" },
       orderBy: { holdUntil: "asc" },
@@ -31,6 +32,7 @@ export default async function EarningsPage({
 
   const escrowHeld = held._sum.amountVnd ?? 0;
   const totalReleased = releasedAgg._sum.amountVnd ?? 0;
+  const escrowFrozen = frozenAgg._sum.amountVnd ?? 0;
 
   return (
     <div>
@@ -39,9 +41,10 @@ export default async function EarningsPage({
       {sp.error && <div className="mb-4"><Alert kind="error">{decodeURIComponent(sp.error)}</Alert></div>}
       {sp.payout && <div className="mb-4"><Alert kind="success">Đã gửi yêu cầu rút tiền. Xử lý trong 2–5 ngày làm việc.</Alert></div>}
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Số dư rút được" value={formatVnd(user.balanceVnd)} />
         <StatCard label="Đang giữ (escrow)" value={formatVnd(escrowHeld)} hint={`Giải ngân sau ${env.rules.escrowHoldDays} ngày`} />
+        <StatCard label="Tạm giữ (khiếu nại)" value={formatVnd(escrowFrozen)} hint="Giữ tới khi xử lý xong tranh chấp" />
         <StatCard label="Đã giải ngân (tổng)" value={formatVnd(totalReleased)} />
       </div>
 
