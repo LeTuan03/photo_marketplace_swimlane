@@ -56,9 +56,13 @@ export default async function LibraryPage({
                     {g.source === "SWAP" && <span className="badge ml-1 bg-fuchsia-100 text-fuchsia-700">Swap</span>}
                     {g.source === "SUBSCRIPTION" && <span className="badge ml-1 bg-emerald-100 text-emerald-700">Gói</span>}
                   </p>
-                  <p className="flex items-center gap-1 text-xs text-emerald-700">
+                  <Link
+                    href={`/verify?cert=${encodeURIComponent(g.certNo)}`}
+                    className="flex items-center gap-1 text-xs text-emerald-700 hover:underline"
+                    title="Xem certificate & phạm vi license"
+                  >
                     <BadgeCheck className="h-3.5 w-3.5" /> Cert: {g.certNo}
-                  </p>
+                  </Link>
                   <p className="text-xs text-gray-400">Còn {remaining}/{g.maxDownloads} lượt tải</p>
                   <DownloadButton
                     action={requestDownloadAction}

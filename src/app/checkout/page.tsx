@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { formatVnd } from "@/lib/money";
 import { LICENSE_LABELS } from "@/lib/constants";
+import { LicenseScope } from "@/components/LicenseScope";
 import { isConfigured } from "@/lib/vnpay";
 import { isConfigured as momoConfigured } from "@/lib/momo";
 import { isConfigured as payosConfigured } from "@/lib/payos";
@@ -21,6 +22,7 @@ export default async function CheckoutPage() {
   });
   const valid = items.filter((i) => i.photo.status === "LIVE" && i.photo.sellerId !== user.id);
   const subtotal = valid.reduce((s, i) => s + i.priceVnd, 0);
+  const licenseTypes = [...new Set(valid.map((i) => i.licenseType))];
   const vnpayReady = isConfigured();
   const momoReady = momoConfigured();
   const payosReady = payosConfigured();
@@ -80,6 +82,29 @@ export default async function CheckoutPage() {
             <span className="text-brand-700">{formatVnd(subtotal)}</span>
           </div>
           <p className="text-xs text-gray-400">Giảm giá (nếu có) được áp dụng sau khi nhập mã ở bước thanh toán.</p>
+
+          {/* Phạm vi license + đồng ý điều khoản: làm rõ ảnh được dùng vào việc gì, tránh
+              dùng sai mục đích ra ngoài (đối chiếu được qua certificate ở /verify). */}
+          <div className="space-y-2 border-t border-gray-100 pt-3">
+            {licenseTypes.map((t) => (
+              <details key={t} className="rounded-lg border border-gray-200 p-3">
+                <summary className="cursor-pointer text-sm font-medium text-gray-800">
+                  Phạm vi license {LICENSE_LABELS[t]}
+                </summary>
+                <div className="mt-3">
+                  <LicenseScope type={t} />
+                </div>
+              </details>
+            ))}
+            <label className="flex items-start gap-2 text-xs text-gray-600">
+              <input type="checkbox" name="agreeLicense" value="1" required className="mt-0.5" />
+              <span>
+                Tôi đã đọc và cam kết chỉ sử dụng ảnh trong đúng phạm vi license đã chọn. Mỗi giao dịch được cấp một
+                certificate có thể tra cứu công khai tại <span className="font-medium text-brand-700">/verify</span>; dùng
+                sai phạm vi có thể bị thu hồi quyền và xử lý.
+              </span>
+            </label>
+          </div>
 
           {(!bankReady || !payosReady || !vnpayReady || !momoReady) && (
             <Alert kind="info">

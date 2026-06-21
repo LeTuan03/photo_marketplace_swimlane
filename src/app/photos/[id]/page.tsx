@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { publicAssetUrl } from "@/lib/storage";
 import { formatVnd } from "@/lib/money";
 import { LICENSE_LABELS, LICENSE_DESCRIPTIONS, LICENSE_ORDER } from "@/lib/constants";
+import { LicenseScope } from "@/components/LicenseScope";
 import { addToCartAction, reportPhotoAction } from "@/app/cart/actions";
 import { subscriptionDownloadAction } from "@/app/subscription/actions";
 import { toggleWishlistAction } from "@/app/wishlist/actions";
@@ -191,6 +192,24 @@ export default async function PhotoDetailPage({
                   <p className="text-xs text-gray-500">
                     Tải về là file gốc {photo.width}×{photo.height}px ({photo.format.toUpperCase()}) — đúng ảnh người bán đăng.
                   </p>
+
+                  <details className="rounded-lg border border-gray-200 p-3">
+                    <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                      Mỗi license được dùng vào việc gì?
+                    </summary>
+                    <div className="mt-3 space-y-4">
+                      {licenses.map((l) => (
+                        <div key={l.type}>
+                          <p className="mb-1.5 text-xs font-semibold text-gray-800">{LICENSE_LABELS[l.type]}</p>
+                          <LicenseScope type={l.type} />
+                        </div>
+                      ))}
+                      <p className="text-xs text-gray-400">
+                        Dùng đúng phạm vi đã mua. Mỗi giao dịch có certificate tra cứu được tại{" "}
+                        <Link href="/verify" className="font-medium text-brand-700 underline">/verify</Link>.
+                      </p>
+                    </div>
+                  </details>
 
                   <div className="flex gap-2">
                     <SubmitButton className="btn-outline flex-1">Thêm vào giỏ</SubmitButton>

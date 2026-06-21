@@ -22,6 +22,64 @@ export const LICENSE_ORDER: LicenseType[] = [
   "EDITORIAL",
 ];
 
+/**
+ * Phạm vi sử dụng CỤ THỂ cho từng license — biến "dùng đúng/sai mục đích" thành thứ
+ * kiểm chứng được. Hiển thị: lúc chọn license (B4), ở bước đồng ý điều khoản khi thanh
+ * toán, và trên trang tra cứu công khai `/verify` (cùng certificate). Đây là cơ sở để
+ * đối chiếu khi nghi một ảnh bị dùng vượt phạm vi ra bên ngoài.
+ */
+export const LICENSE_SCOPE: Record<LicenseType, { allowed: string[]; forbidden: string[] }> = {
+  PERSONAL: {
+    allowed: [
+      "Mục đích cá nhân, phi lợi nhuận",
+      "Trang/mạng xã hội cá nhân (không phải quảng cáo)",
+      "In ấn cá nhân số lượng nhỏ (trang trí, quà tặng)",
+      "Bài tập, đồ án học tập",
+    ],
+    forbidden: [
+      "Quảng cáo, marketing, nội dung được tài trợ",
+      "Sản phẩm/dịch vụ bán ra, bao bì, ấn phẩm thương mại",
+      "Logo, nhận diện thương hiệu",
+      "Bán lại hoặc phân phối lại file ảnh",
+    ],
+  },
+  COMMERCIAL: {
+    allowed: [
+      "Quảng cáo, marketing, mạng xã hội của doanh nghiệp",
+      "Website, landing page, ấn phẩm thương mại",
+      "Bao bì sản phẩm (tối đa ~500.000 bản)",
+      "Thuyết trình, nội dung trả phí, video",
+    ],
+    forbidden: [
+      "Bán lại / phân phối lại chính file ảnh dưới dạng stock",
+      "Sản phẩm phái sinh để bán KHÔNG giới hạn số lượng (cần license Mở rộng)",
+      "Đăng ký nhãn hiệu/logo độc quyền từ ảnh",
+    ],
+  },
+  EXTENDED: {
+    allowed: [
+      "Toàn bộ quyền của license Thương mại",
+      "Sản phẩm phái sinh để BÁN không giới hạn số lượng (áo, cốc, template, theme...)",
+      "In ấn không giới hạn số bản",
+    ],
+    forbidden: [
+      "Bán lại / phân phối lại chính file ảnh gốc dưới dạng stock",
+    ],
+  },
+  EDITORIAL: {
+    allowed: [
+      "Báo chí, tin tức, bài viết mang tính thông tin",
+      "Mục đích giáo dục, học thuật",
+      "Bình luận, phê bình, nội dung biên tập",
+    ],
+    forbidden: [
+      "MỌI mục đích thương mại / quảng cáo / bán hàng",
+      "Sản phẩm bán ra, bao bì, marketing",
+      "Ngụ ý sự chứng thực/tài trợ của người hoặc thương hiệu xuất hiện trong ảnh",
+    ],
+  },
+};
+
 // Gợi ý giá mặc định theo license (VND) khi seller đăng ảnh
 export const DEFAULT_LICENSE_PRICE: Record<LicenseType, number> = {
   PERSONAL: 50_000,

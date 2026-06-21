@@ -422,3 +422,63 @@ export async function processPayoutAction(formData: FormData) {
   revalidatePath("/admin/payouts");
   redirect("/admin/payouts");
 }
+
+/**
+ * Xử lý báo cáo dùng SAI phạm vi license (vd: giữ license Cá nhân nhưng dùng thương mại).
+ * - uphold: ghi nhận vi phạm, +1 điểm phạt cho NGƯỜI GIỮ license (nếu tra ra grant) và
+ *   cảnh báo họ; báo lại người tố cáo.
+ * - reject: bác bỏ (dùng đúng phạm vi / thiếu bằng chứng).
+ * Idempotent: chỉ xử lý báo cáo còn OPEN.
+ */
+export async function reviewMisuseAction(formData: FormData) {
+  await requireRole("ADMIN");
+  const reportId = String(formData.get("reportId") ?? "");
+  const decision = String(formData.get("decision") ?? "");
+  const note = String(formData.get("note") ?? "").slice(0, 300);
+
+  const report = await prisma.misuseReport.findUnique({
+    where: { id: reportId },
+    include: { grant: { select: { buyerId: true } }, photo: { select: { title: true } } },
+  });
+  if (!report || report.status !== "OPEN") redirect("/admin/misuse");
+
+  const upheld = decision === "uphold";
+  // Giành báo cáo nguyên tử OPEN -> trạng thái cuối, chống double-submit cộng phạt 2 lần.
+  const claimed = await prisma.misuseReport.updateMany({
+    where: { id: reportId, status: "OPEN" },
+    data: {
+      status: upheld ? "UPHELD" : "REJECTED",
+      reviewNote: note || null,
+      resolvedAt: new Date(),
+    },
+  });
+  if (claimed.count === 0) redirect("/admin/misuse");
+
+  if (upheld && report!.grant) {
+    // Điểm phạt thuộc về NGƯỜI GIỮ license đã dùng sai (không phải người bán ảnh).
+    await prisma.user.update({
+      where: { id: report!.grant.buyerId },
+      data: { penaltyPoints: { increment: 1 } },
+    });
+    await notify({
+      userId: report!.grant.buyerId,
+      type: "GENERIC",
+      title: "Cảnh báo: dùng ảnh sai phạm vi license",
+      body: `Hệ thống ghi nhận ảnh "${report!.photo.title}" bị dùng vượt phạm vi license bạn đang giữ. Vui lòng gỡ bỏ hoặc nâng cấp license phù hợp để tránh bị khóa tài khoản.`,
+      link: "/library",
+      email: true,
+    });
+  }
+  await notify({
+    userId: report!.reporterId,
+    type: "GENERIC",
+    title: upheld ? "Báo cáo dùng sai license đã được xử lý" : "Báo cáo dùng sai license đã được xem xét",
+    body: upheld
+      ? "Cảm ơn bạn. Quản trị viên xác nhận có vi phạm phạm vi license và đã xử lý."
+      : "Quản trị viên đã xem xét và chưa đủ căn cứ xác định vi phạm. Cảm ơn bạn đã báo cáo.",
+    email: false,
+  });
+
+  revalidatePath("/admin/misuse");
+  redirect("/admin/misuse");
+}

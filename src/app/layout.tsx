@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 
@@ -14,7 +15,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Navbar />
         <main className="container-app py-6">{children}</main>
         <footer className="border-t border-gray-200 bg-white py-6 text-center text-xs text-gray-400">
-          Picseo — Hệ thống mua bán & trao đổi ảnh online · Thanh toán an toàn qua Escrow
+          <p>Picseo — Hệ thống mua bán & trao đổi ảnh online · Thanh toán an toàn qua Escrow</p>
+          <p className="mt-1">
+            <Link href="/verify" className="hover:text-gray-600 hover:underline">Tra cứu license / certificate</Link>
+          </p>
         </footer>
       </body>
     </html>

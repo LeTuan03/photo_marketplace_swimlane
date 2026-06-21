@@ -21,6 +21,11 @@ export async function createOrderAndPayAction(formData: FormData) {
   const couponCode = String(formData.get("coupon") ?? "").trim().toUpperCase();
   const provider = String(formData.get("provider") ?? "BANKQR");
 
+  // Người mua phải cam kết dùng đúng phạm vi license (đối chiếu được qua certificate ở /verify).
+  if (formData.get("agreeLicense") !== "1") {
+    redirectError("/checkout?error=Vui lòng xác nhận cam kết sử dụng ảnh đúng phạm vi license");
+  }
+
   const cart = await prisma.cartItem.findMany({
     where: { userId: user.id },
     include: {

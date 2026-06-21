@@ -56,6 +56,12 @@ enum LicenseType {
   EDITORIAL
 }
 
+enum MisuseStatus {
+  OPEN // báo cáo mới, chờ admin xét
+  UPHELD // admin xác nhận có vi phạm phạm vi license
+  REJECTED // admin bác bỏ (dùng đúng phạm vi / thiếu bằng chứng)
+}
+
 enum OrderStatus {
   PENDING // chờ thanh toán (TT1)
   PAID // thanh toán thành công (TT2 -> TT3)
@@ -202,6 +208,7 @@ model User {
   dmcaClaims         DmcaClaim[]         @relation("DmcaClaimant")
   refundsReceived    RefundRecord[]      @relation("BuyerRefunds")
   sellerApplications SellerApplication[]
+  misuseReports      MisuseReport[]
 
   @@index([role])
 }
@@ -261,6 +268,7 @@ model Photo {
   reviews        Review[]
   wishlistItems  WishlistItem[]
   dmcaClaims     DmcaClaim[]
+  misuseReports  MisuseReport[]
 
   @@index([status])
   @@index([sellerId])
@@ -393,7 +401,33 @@ model DownloadGrant {
   certNo        String      @unique // mã chứng nhận license
   createdAt     DateTime    @default(now())
 
+  misuseReports MisuseReport[]
+
   @@index([buyerId])
+}
+
+/// Báo cáo một ảnh đang bị DÙNG SAI PHẠM VI license (vd: mua "Cá nhân" nhưng chạy
+/// quảng cáo thương mại). Khác Dispute/DMCA (báo về CHÍNH ảnh) — đây báo về CÁCH DÙNG
+/// của người giữ license ở bên ngoài. Tra cứu qua certNo ở trang công khai `/verify`.
+model MisuseReport {
+  id         String       @id @default(cuid())
+  photo      Photo        @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  photoId    String
+  // Grant (giấy phép) bị nghi dùng sai — gắn được nếu certNo tra ra. null nếu không rõ.
+  grant      DownloadGrant? @relation(fields: [grantId], references: [id])
+  grantId    String?
+  certNo     String? // mã chứng nhận người báo cáo nhập (giữ lại kể cả khi không tra ra grant)
+  reporter   User         @relation(fields: [reporterId], references: [id])
+  reporterId String
+  usageUrl   String // nơi ảnh bị dùng sai (link bằng chứng)
+  detail     String       @default("")
+  status     MisuseStatus @default(OPEN)
+  reviewNote String?
+  createdAt  DateTime     @default(now())
+  resolvedAt DateTime?
+
+  @@index([status])
+  @@index([photoId])
 }
 
 model Payout {
