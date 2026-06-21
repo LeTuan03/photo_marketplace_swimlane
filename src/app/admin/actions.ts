@@ -176,6 +176,55 @@ export async function setTierAction(formData: FormData) {
   redirect("/admin/users");
 }
 
+/** S1: admin duyệt / từ chối YÊU CẦU mở kênh bán. Duyệt -> nâng role BUYER lên SELLER. */
+export async function reviewSellerApplicationAction(formData: FormData) {
+  const admin = await requireRole("ADMIN");
+  const id = String(formData.get("id") ?? "");
+  const decision = String(formData.get("decision") ?? "");
+  const note = String(formData.get("note") ?? "").slice(0, 300);
+
+  const app = await prisma.sellerApplication.findUnique({ where: { id } });
+  if (!app || app.status !== "PENDING") redirect("/admin/sellers");
+
+  if (decision === "approve") {
+    // Giành đơn nguyên tử PENDING -> APPROVED rồi mới nâng role (chống double-submit).
+    await prisma.$transaction(async (tx) => {
+      const claimed = await tx.sellerApplication.updateMany({
+        where: { id, status: "PENDING" },
+        data: { status: "APPROVED", reviewedAt: new Date(), reviewedBy: admin.id, reviewNote: note || null },
+      });
+      if (claimed.count === 0) return;
+      // Chỉ nâng nếu vẫn là BUYER (không hạ cấp admin / không đụng seller hiện hữu).
+      await tx.user.updateMany({ where: { id: app!.userId, role: "BUYER" }, data: { role: "SELLER" } });
+    });
+    await notify({
+      userId: app!.userId,
+      type: "GENERIC",
+      title: "Yêu cầu mở kênh bán được duyệt",
+      body: "Tài khoản của bạn đã được nâng cấp thành người bán. Vào Kênh bán để bắt đầu đăng ảnh. Hãy xác minh danh tính (KYC) trước khi rút tiền.",
+      link: "/seller",
+      email: true,
+    });
+  } else {
+    const claimed = await prisma.sellerApplication.updateMany({
+      where: { id, status: "PENDING" },
+      data: { status: "REJECTED", reviewedAt: new Date(), reviewedBy: admin.id, reviewNote: note || null },
+    });
+    if (claimed.count > 0) {
+      await notify({
+        userId: app!.userId,
+        type: "GENERIC",
+        title: "Yêu cầu mở kênh bán bị từ chối",
+        body: `Yêu cầu trở thành người bán chưa được chấp nhận.${note ? ` Lý do: ${note}` : ""} Bạn có thể gửi lại yêu cầu.`,
+        link: "/profile",
+        email: true,
+      });
+    }
+  }
+  revalidatePath("/admin/sellers");
+  redirect("/admin/sellers");
+}
+
 /** AD7/AD8: giải quyết tranh chấp -> hoàn tiền hoặc bác bỏ. */
 export async function resolveDisputeAction(formData: FormData) {
   await requireRole("ADMIN");

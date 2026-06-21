@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { formatVnd } from "@/lib/money";
 import { TIER_LABELS, PLAN_LABELS } from "@/lib/constants";
-import { becomeSellerAction } from "@/app/(auth)/actions";
+import { requestSellerAction } from "@/app/(auth)/actions";
 import { updateProfileAction } from "./actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import { PageHeader, Alert } from "@/components/ui";
@@ -23,13 +23,20 @@ const KYC_LABELS: Record<KycStatus, { label: string; cls: string }> = {
 export default async function ProfilePage({
   searchParams,
 }: {
-  searchParams: Promise<{ saved?: string; error?: string }>;
+  searchParams: Promise<{ saved?: string; error?: string; seller_requested?: string }>;
 }) {
   const user = await requireUser();
   const sp = await searchParams;
 
   const isSeller = user.role === "SELLER" || user.role === "ADMIN";
-  const orders = await prisma.order.count({ where: { buyerId: user.id, status: "PAID" } });
+  const [orders, lastApplication] = await Promise.all([
+    prisma.order.count({ where: { buyerId: user.id, status: "PAID" } }),
+    isSeller
+      ? Promise.resolve(null)
+      : prisma.sellerApplication.findFirst({ where: { userId: user.id }, orderBy: { createdAt: "desc" } }),
+  ]);
+  const sellerPending = lastApplication?.status === "PENDING";
+  const sellerRejected = lastApplication?.status === "REJECTED";
   const avgRating = user.ratingCount > 0 ? (user.ratingSum / user.ratingCount).toFixed(1) : null;
   const initials = (user.name || user.email).slice(0, 2).toUpperCase();
 
@@ -38,6 +45,7 @@ export default async function ProfilePage({
       <PageHeader title="Tài khoản" subtitle="Thông tin cá nhân, gói và đăng ký bán hàng." />
 
       {sp.saved && <div className="mb-4"><Alert kind="success">Đã lưu thông tin tài khoản.</Alert></div>}
+      {sp.seller_requested && <div className="mb-4"><Alert kind="success">Đã gửi yêu cầu mở kênh bán. Vui lòng chờ quản trị viên duyệt.</Alert></div>}
       {sp.error && <div className="mb-4"><Alert kind="error">{decodeURIComponent(sp.error)}</Alert></div>}
 
       {/* Hồ sơ */}
@@ -150,18 +158,47 @@ export default async function ProfilePage({
             <ShieldCheck className="h-5 w-5 text-brand-700" />
             <h2 className="font-semibold text-gray-900">Trở thành người bán</h2>
           </div>
-          <p className="mt-2 text-sm text-gray-600">
-            Đăng ký kênh bán để upload và kiếm tiền từ ảnh của bạn. Sau khi đăng ký bạn cần xác minh danh tính (KYC)
-            để rút tiền. Hoa hồng nền tảng áp theo hạng (Mới 30% · Pro 20% · Elite 10%).
-          </p>
-          <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-600">
-            <li>Upload ảnh JPG/PNG/WebP, tối đa 50MB mỗi ảnh</li>
-            <li>Đặt giá theo từng loại license</li>
-            <li>Tiền bán giữ trong escrow 7 ngày rồi giải ngân</li>
-          </ul>
-          <form action={becomeSellerAction} className="mt-4">
-            <SubmitButton className="btn-primary">Đăng ký làm người bán</SubmitButton>
-          </form>
+
+          {sellerPending ? (
+            <div className="mt-3">
+              <Alert kind="info">
+                Yêu cầu mở kênh bán của bạn đang chờ quản trị viên duyệt. Bạn sẽ nhận thông báo khi có kết quả.
+              </Alert>
+            </div>
+          ) : (
+            <>
+              <p className="mt-2 text-sm text-gray-600">
+                Gửi yêu cầu mở kênh bán để upload và kiếm tiền từ ảnh của bạn. Yêu cầu cần được quản trị viên
+                duyệt; sau đó bạn xác minh danh tính (KYC) để rút tiền. Hoa hồng nền tảng áp theo hạng
+                (Mới 30% · Pro 20% · Elite 10%).
+              </p>
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-600">
+                <li>Upload ảnh JPG/PNG/WebP, tối đa 50MB mỗi ảnh</li>
+                <li>Đặt giá theo từng loại license</li>
+                <li>Tiền bán giữ trong escrow 7 ngày rồi giải ngân</li>
+              </ul>
+              {sellerRejected && (
+                <div className="mt-3">
+                  <Alert kind="error">
+                    Yêu cầu trước đã bị từ chối{lastApplication?.reviewNote ? `: ${lastApplication.reviewNote}` : "."} Bạn có thể gửi lại.
+                  </Alert>
+                </div>
+              )}
+              <form action={requestSellerAction} className="mt-4 space-y-3">
+                <div>
+                  <label className="label">Giới thiệu ngắn (tuỳ chọn)</label>
+                  <textarea
+                    name="pitch"
+                    rows={3}
+                    maxLength={1000}
+                    className="input"
+                    placeholder="Bạn chụp/thiết kế thể loại ảnh gì? Vì sao muốn mở kênh bán?"
+                  />
+                </div>
+                <SubmitButton className="btn-primary">{sellerRejected ? "Gửi lại yêu cầu" : "Gửi yêu cầu mở kênh bán"}</SubmitButton>
+              </form>
+            </>
+          )}
         </div>
       )}
 

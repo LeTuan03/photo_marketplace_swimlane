@@ -47,9 +47,9 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL("/", req.url));
   }
 
-  if (pathname.startsWith("/seller") && role !== "SELLER" && role !== "ADMIN") {
-    return NextResponse.redirect(new URL("/become-seller", req.url));
-  }
+  // KHÔNG chặn /seller theo role trong middleware: role nằm trong JWT (có thể cũ ngay
+  // sau khi admin duyệt yêu cầu bán). Việc gating /seller do SellerLayout làm theo role
+  // ĐỌC TỪ DB -> người vừa được duyệt vào được ngay, không cần đăng nhập lại.
 
   return NextResponse.next();
 }

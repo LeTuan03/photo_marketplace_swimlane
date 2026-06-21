@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { LayoutDashboard, Upload, Images, Wallet, Receipt } from "lucide-react";
-import { requireRole } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +13,11 @@ const nav = [
   { href: "/seller/earnings", label: "Thu nhập", icon: Wallet },
 ];
 
-export default async function SellerLayout({ children }: { children: React.ReactNode }) {
-  await requireRole("SELLER", "ADMIN");
+export default async function SellerLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // Gating theo role ĐỌC TỪ DB (không phải JWT): người vừa được admin duyệt mở kênh bán
+  // vào được ngay mà không cần đăng nhập lại. Người chưa phải seller -> trang đăng ký.
+  const user = await requireUser();
+  if (user.role !== "SELLER" && user.role !== "ADMIN") redirect("/become-seller");
   return (
     <div className="grid gap-6 md:grid-cols-[200px_1fr]">
       <aside className="md:sticky md:top-20 md:h-fit">

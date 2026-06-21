@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, verifyPassword, DUMMY_HASH } from "@/lib/password";
 import { createSession, destroySession, getCurrentUser } from "@/lib/auth";
+import { notifyAdmins } from "@/lib/notifications";
 import { registerSchema, loginSchema, safeInternalPath } from "@/lib/validation";
 
 function back(path: string, error: string, extra?: Record<string, string>) {
@@ -73,13 +74,28 @@ export async function logoutAction() {
   redirect("/");
 }
 
-/** Nâng cấp tài khoản BUYER hiện tại thành SELLER (đăng ký bán — S1). */
-export async function becomeSellerAction() {
+/**
+ * Gửi YÊU CẦU mở kênh bán (S1) — KHÔNG nâng role ngay. Người dùng vẫn là BUYER tới khi
+ * admin duyệt ở /admin/sellers (chống tự cấp quyền bán + thấy chức năng bán khi chưa duyệt).
+ */
+export async function requestSellerAction(formData: FormData) {
   const user = await getCurrentUser();
   if (!user) redirect("/login?next=/become-seller");
-  if (user!.role === "BUYER") {
-    await prisma.user.update({ where: { id: user!.id }, data: { role: "SELLER", kycStatus: "PENDING" } });
-    await createSession({ uid: user!.id, email: user!.email, name: user!.name, role: "SELLER" });
+  if (user!.role === "SELLER" || user!.role === "ADMIN") redirect("/seller");
+
+  // Chỉ tạo 1 yêu cầu đang chờ tại một thời điểm (cho phép gửi lại sau khi bị từ chối).
+  const pending = await prisma.sellerApplication.findFirst({
+    where: { userId: user!.id, status: "PENDING" },
+    select: { id: true },
+  });
+  if (!pending) {
+    const pitch = String(formData.get("pitch") ?? "").slice(0, 1000);
+    await prisma.sellerApplication.create({ data: { userId: user!.id, pitch } });
+    await notifyAdmins(
+      "Yêu cầu mở kênh bán mới",
+      `${user!.name} (${user!.email}) muốn trở thành người bán.`,
+      "/admin/sellers",
+    );
   }
-  redirect("/seller");
+  redirect("/profile?seller_requested=1");
 }
