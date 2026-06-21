@@ -69,8 +69,8 @@ export async function GET(req: NextRequest) {
         .replace(/[^a-zA-Z0-9._-]+/g, "-")
         .replace(/^-+|-+$/g, "")
         .slice(0, 60) || "picseo";
-    const filename = `${prettyName}-${grant.sizeLabel}.${ext}`;
-    const asciiFilename = `${asciiName}-${grant.sizeLabel}.${ext}`;
+    const filename = `${prettyName}.${ext}`;
+    const asciiFilename = `${asciiName}.${ext}`;
 
     return new NextResponse(new Uint8Array(buffer), {
       headers: {

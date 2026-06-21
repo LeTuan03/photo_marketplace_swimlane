@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { publicAssetUrl } from "@/lib/storage";
 import { formatVnd } from "@/lib/money";
-import { LICENSE_LABELS, SIZE_LABELS } from "@/lib/constants";
+import { LICENSE_LABELS } from "@/lib/constants";
 import { removeCartItemAction, clearCartAction } from "./actions";
 import { PageHeader, EmptyState } from "@/components/ui";
 
@@ -45,7 +45,7 @@ export default async function CartPage() {
                     {it.photo.title}
                   </Link>
                   <p className="text-xs text-gray-500">
-                    License: {LICENSE_LABELS[it.licenseType]} · Kích thước: {SIZE_LABELS[it.sizeLabel] ?? it.sizeLabel}
+                    License: {LICENSE_LABELS[it.licenseType]}
                   </p>
                 </div>
                 <div className="font-semibold text-gray-900">{formatVnd(it.priceVnd)}</div>

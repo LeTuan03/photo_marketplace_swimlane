@@ -4,7 +4,7 @@ import { ShieldCheck, Ruler, FileImage, Tag, Repeat, AlertTriangle, Heart } from
 import { prisma } from "@/lib/prisma";
 import { publicAssetUrl } from "@/lib/storage";
 import { formatVnd } from "@/lib/money";
-import { LICENSE_LABELS, LICENSE_DESCRIPTIONS, LICENSE_ORDER, SIZE_LABELS } from "@/lib/constants";
+import { LICENSE_LABELS, LICENSE_DESCRIPTIONS, LICENSE_ORDER } from "@/lib/constants";
 import { addToCartAction, reportPhotoAction } from "@/app/cart/actions";
 import { subscriptionDownloadAction } from "@/app/subscription/actions";
 import { toggleWishlistAction } from "@/app/wishlist/actions";
@@ -44,27 +44,37 @@ export default async function PhotoDetailPage({
   const quota = viewer ? getQuotaState(viewer) : null;
   const canSubDownload = Boolean(quota?.isActive && !isOwner && (quota!.remaining > 0 || (quota!.resetAt && quota!.resetAt <= new Date())));
 
-  // Đánh giá + wishlist
-  const [reviews, ownsGrant, myReview, wishItem] = await Promise.all([
+  // Đánh giá + wishlist + các grant người xem đã sở hữu cho ảnh này
+  const [reviews, myGrants, myReview, wishItem] = await Promise.all([
     prisma.review.findMany({
       where: { photoId: id },
       orderBy: { createdAt: "desc" },
       take: 50,
       include: { buyer: { select: { name: true } } },
     }),
-    viewer ? prisma.downloadGrant.findFirst({ where: { buyerId: viewer.id, photoId: id } }) : null,
+    viewer
+      ? prisma.downloadGrant.findMany({
+          where: { buyerId: viewer.id, photoId: id },
+          select: { licenseType: true, maxDownloads: true },
+        })
+      : [],
     viewer ? prisma.review.findUnique({ where: { photoId_buyerId: { photoId: id, buyerId: viewer.id } } }) : null,
     viewer ? prisma.wishlistItem.findUnique({ where: { userId_photoId: { userId: viewer.id, photoId: id } } }) : null,
   ]);
-  const canReview = Boolean(viewer && !isOwner && ownsGrant);
+  const canReview = Boolean(viewer && !isOwner && myGrants.length > 0);
   const inWishlist = Boolean(wishItem);
+
+  // License đã sở hữu (grant còn quyền tải, maxDownloads > 0 — bỏ qua grant đã hoàn tiền).
+  // Dùng để chặn mua lại đúng ảnh + đúng license người mua đã có.
+  const ownedLicenses = new Set(myGrants.filter((g) => g.maxDownloads > 0).map((g) => g.licenseType));
 
   await prisma.photo.update({ where: { id }, data: { viewCount: { increment: 1 } } }).catch(() => {});
 
   const licenses = LICENSE_ORDER.map((t) => photo.licenses.find((l) => l.type === t)).filter(
     (l): l is NonNullable<typeof l> => Boolean(l),
   );
-  const sizes = ["S", "M", "L", "ORIGINAL"];
+  const ownsAll = licenses.length > 0 && licenses.every((l) => ownedLicenses.has(l.type));
+  const firstBuyableType = licenses.find((l) => !ownedLicenses.has(l.type))?.type;
 
   return (
     <div>
@@ -126,39 +136,69 @@ export default async function PhotoDetailPage({
                 </button>
               </form>
             )}
-            <h2 className="mb-3 font-semibold text-gray-900">Chọn license & kích thước</h2>
-            <form action={addToCartAction} className="space-y-4">
-              <input type="hidden" name="photoId" value={photo.id} />
+            {ownedLicenses.size > 0 && !isOwner && (
+              <Alert kind="success">
+                Bạn đã sở hữu ảnh này{ownsAll ? "" : " (một số license)"}.{" "}
+                <Link href="/library" className="font-medium underline">Tải về trong Thư viện</Link>.
+              </Alert>
+            )}
 
-              <div className="space-y-2">
-                {licenses.map((l, i) => (
-                  <label key={l.type} className="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 hover:border-brand-400 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50">
-                    <input type="radio" name="licenseType" value={l.type} defaultChecked={i === 0} className="mt-1" required />
-                    <span className="flex-1">
-                      <span className="flex items-center justify-between">
-                        <span className="font-medium text-gray-900">{LICENSE_LABELS[l.type]}</span>
-                        <span className="font-semibold text-brand-700">{formatVnd(l.priceVnd)}</span>
-                      </span>
-                      <span className="mt-0.5 block text-xs text-gray-500">{LICENSE_DESCRIPTIONS[l.type]}</span>
-                    </span>
-                  </label>
-                ))}
-              </div>
+            {ownsAll ? (
+              <Link href="/library" className="btn-primary mt-3 w-full">Tải về trong Thư viện</Link>
+            ) : (
+              <>
+                <h2 className="mb-3 mt-3 font-semibold text-gray-900">Chọn license</h2>
+                <form action={addToCartAction} className="space-y-4">
+                  <input type="hidden" name="photoId" value={photo.id} />
 
-              <div>
-                <label className="label">Kích thước tải</label>
-                <select name="sizeLabel" defaultValue="ORIGINAL" className="input">
-                  {sizes.map((s) => (
-                    <option key={s} value={s}>{SIZE_LABELS[s]}</option>
-                  ))}
-                </select>
-              </div>
+                  <div className="space-y-2">
+                    {licenses.map((l) => {
+                      const owned = ownedLicenses.has(l.type);
+                      return (
+                        <label
+                          key={l.type}
+                          className={`flex items-start gap-3 rounded-lg border p-3 ${
+                            owned
+                              ? "cursor-not-allowed border-gray-200 bg-gray-50 opacity-60"
+                              : "cursor-pointer border-gray-200 hover:border-brand-400 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="licenseType"
+                            value={l.type}
+                            defaultChecked={l.type === firstBuyableType}
+                            disabled={owned}
+                            className="mt-1"
+                            required
+                          />
+                          <span className="flex-1">
+                            <span className="flex items-center justify-between">
+                              <span className="font-medium text-gray-900">{LICENSE_LABELS[l.type]}</span>
+                              {owned ? (
+                                <span className="badge bg-emerald-100 text-emerald-700">Đã sở hữu</span>
+                              ) : (
+                                <span className="font-semibold text-brand-700">{formatVnd(l.priceVnd)}</span>
+                              )}
+                            </span>
+                            <span className="mt-0.5 block text-xs text-gray-500">{LICENSE_DESCRIPTIONS[l.type]}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
 
-              <div className="flex gap-2">
-                <SubmitButton className="btn-outline flex-1">Thêm vào giỏ</SubmitButton>
-                <button name="buyNow" value="1" className="btn-primary flex-1">Mua ngay</button>
-              </div>
-            </form>
+                  <p className="text-xs text-gray-500">
+                    Tải về là file gốc {photo.width}×{photo.height}px ({photo.format.toUpperCase()}) — đúng ảnh người bán đăng.
+                  </p>
+
+                  <div className="flex gap-2">
+                    <SubmitButton className="btn-outline flex-1">Thêm vào giỏ</SubmitButton>
+                    <button name="buyNow" value="1" className="btn-primary flex-1">Mua ngay</button>
+                  </div>
+                </form>
+              </>
+            )}
 
             {canSubDownload && (
               <div className="mt-3 border-t border-gray-100 pt-3">

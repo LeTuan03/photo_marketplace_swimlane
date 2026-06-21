@@ -30,6 +30,13 @@ export async function addToCartAction(formData: FormData) {
     redirect(`/photos/${photoId}?error=Không thể mua ảnh của chính bạn`);
   }
 
+  // Chặn mua lại đúng ảnh + đúng license người mua đã sở hữu (grant còn quyền tải).
+  const owned = await prisma.downloadGrant.findFirst({
+    where: { buyerId: user!.id, photoId, licenseType, maxDownloads: { gt: 0 } },
+    select: { id: true },
+  });
+  if (owned) redirect(`/photos/${photoId}?error=Bạn đã sở hữu ảnh này với license này. Tải về trong Thư viện.`);
+
   await prisma.cartItem.upsert({
     where: { userId_photoId_licenseType: { userId: user!.id, photoId, licenseType } },
     update: { sizeLabel, priceVnd: license!.priceVnd },

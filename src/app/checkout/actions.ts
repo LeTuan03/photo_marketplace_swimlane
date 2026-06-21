@@ -22,12 +22,47 @@ export async function createOrderAndPayAction(formData: FormData) {
 
   const cart = await prisma.cartItem.findMany({
     where: { userId: user.id },
-    include: { photo: { include: { seller: { select: { id: true, sellerTier: true } } } } },
+    include: {
+      photo: { include: { seller: { select: { id: true, sellerTier: true } }, licenses: true } },
+    },
   });
-  const valid = cart.filter((c) => c.photo.status === "LIVE" && c.photo.sellerId !== user.id);
-  if (valid.length === 0) redirect("/cart?error=Giỏ hàng trống");
 
-  const subtotal = valid.reduce((s, c) => s + c.priceVnd, 0);
+  // Tỉ lệ hoa hồng theo tier người bán (AD4) — đọc từ cấu hình admin
+  const settings = await getSettings();
+
+  // Các license người mua đã sở hữu (grant còn quyền tải) — để bỏ qua, chống mua trùng.
+  const ownedGrants = await prisma.downloadGrant.findMany({
+    where: { buyerId: user.id, photoId: { in: cart.map((c) => c.photoId) }, maxDownloads: { gt: 0 } },
+    select: { photoId: true, licenseType: true },
+  });
+  const ownedSet = new Set(ownedGrants.map((g) => `${g.photoId}:${g.licenseType}`));
+
+  // Dựng item kèm GIÁ HIỆN TẠI của license (KHÔNG tin priceVnd cũ lưu trong giỏ — người
+  // bán có thể đã đổi giá). Loại item: ảnh không LIVE / của chính mình / license đã bị gỡ
+  // hoặc giá <= 0 / đã sở hữu trước đó.
+  const lineItems = cart.flatMap((c) => {
+    if (c.photo.status !== "LIVE" || c.photo.sellerId === user.id) return [];
+    if (ownedSet.has(`${c.photoId}:${c.licenseType}`)) return [];
+    const license = c.photo.licenses.find((l) => l.type === c.licenseType);
+    if (!license || license.priceVnd <= 0) return [];
+    const { platformFeeVnd, sellerEarningVnd } = splitPrice(
+      license.priceVnd,
+      commissionFor(c.photo.seller.sellerTier, settings),
+    );
+    return [{
+      photoId: c.photoId,
+      sellerId: c.photo.sellerId,
+      licenseType: c.licenseType,
+      sizeLabel: c.sizeLabel,
+      priceVnd: license.priceVnd,
+      platformFeeVnd,
+      sellerEarningVnd,
+    }];
+  });
+  if (lineItems.length === 0) redirect("/cart?error=Không có sản phẩm hợp lệ để thanh toán");
+
+  const subtotal = lineItems.reduce((s, i) => s + i.priceVnd, 0);
+  const totalPlatformFee = lineItems.reduce((s, i) => s + i.platformFeeVnd, 0);
 
   // Coupon (B5) — mỗi người dùng chỉ áp dụng MỘT lần để chống lạm dụng mã giảm giá
   // (đặc biệt mã 100% -> đơn 0đ fulfill miễn phí). Nếu đã từng dùng -> bỏ qua giảm giá.
@@ -47,17 +82,18 @@ export async function createOrderAndPayAction(formData: FormData) {
       couponId = coupon.id;
     }
   }
+  // Coupon do SÀN tài trợ: người bán luôn nhận ĐỦ earning, nên không cho giảm sâu hơn tổng
+  // phí sàn — nếu không, phí sàn âm = sàn bù tiền túi. Kẹp giảm giá ở mức tổng phí sàn.
+  discount = Math.min(discount, totalPlatformFee);
   const total = Math.max(0, subtotal - discount);
+  const platformFeeVnd = totalPlatformFee - discount; // luôn >= 0 sau khi kẹp
 
   // PayOS yêu cầu orderCode dạng SỐ; các cổng khác dùng chuỗi PIC...
   // providerTxnRef lưu chuỗi (với PayOS là String(orderCode)) để webhook tra cứu.
   const orderCode = provider === "PAYOS" ? makeOrderCode() : null;
   const txnRef = orderCode === null ? makeTxnRef() : String(orderCode);
 
-  // Tỉ lệ hoa hồng theo tier người bán (AD4) — đọc từ cấu hình admin
-  const settings = await getSettings();
-
-  // Tạo đơn + item, tính phí platform theo tier người bán (AD4)
+  // Tạo đơn + item (phí sàn đã tính sẵn, không cần update lại sau khi tạo)
   const order = await prisma.order.create({
     data: {
       buyerId: user.id,
@@ -65,41 +101,19 @@ export async function createOrderAndPayAction(formData: FormData) {
       subtotalVnd: subtotal,
       discountVnd: discount,
       totalVnd: total,
-      platformFeeVnd: 0,
+      platformFeeVnd,
       couponId,
       paymentProvider: provider,
       providerTxnRef: txnRef,
-      items: {
-        create: valid.map((c) => {
-          const { platformFeeVnd, sellerEarningVnd } = splitPrice(
-            c.priceVnd,
-            commissionFor(c.photo.seller.sellerTier, settings),
-          );
-          return {
-            photoId: c.photoId,
-            sellerId: c.photo.sellerId,
-            licenseType: c.licenseType,
-            sizeLabel: c.sizeLabel,
-            priceVnd: c.priceVnd,
-            platformFeeVnd,
-            sellerEarningVnd,
-          };
-        }),
-      },
+      items: { create: lineItems },
     },
-    include: { items: true },
-  });
-
-  const platformFee = order.items.reduce((s, i) => s + i.platformFeeVnd, 0) - discount;
-  await prisma.order.update({
-    where: { id: order.id },
-    data: { platformFeeVnd: Math.max(0, platformFee) },
   });
 
   // Xóa giỏ sau khi tạo đơn
   await prisma.cartItem.deleteMany({ where: { userId: user.id } });
 
-  // Đơn miễn phí (coupon 100%) -> hoàn tất luôn
+  // An toàn: nếu tổng về 0đ (sau khi kẹp giảm giá, thực tế không xảy ra vì discount đã
+  // bị giới hạn ở mức phí sàn < subtotal) thì hoàn tất luôn, không qua cổng.
   if (total === 0) {
     await fulfillPaidOrder(order.id, "FREE");
     redirect(`/payment/result?status=success&order=${order.id}`);
