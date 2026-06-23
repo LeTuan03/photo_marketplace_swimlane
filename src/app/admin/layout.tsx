@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, CheckSquare, Users, AlertTriangle, Wallet, Settings, FolderTree, ShieldAlert, QrCode, Undo2, Store, ScanSearch } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Users, AlertTriangle, Wallet, Settings, FolderTree, ShieldAlert, QrCode, Undo2, Store, ScanSearch, Landmark } from "lucide-react";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   await requireRole("ADMIN");
-  const [pending, openDisputes, payouts, dmca, bankOrders, bankSubs, pendingRefunds, pendingSellers, openMisuse] = await Promise.all([
+  const [pending, openDisputes, payouts, dmca, bankOrders, bankSubs, pendingRefunds, pendingSellers, openMisuse, bankTxnPending] = await Promise.all([
     prisma.photo.count({ where: { status: "PENDING" } }),
     prisma.dispute.count({ where: { status: "OPEN" } }),
     prisma.payout.count({ where: { status: "REQUESTED" } }),
@@ -17,6 +17,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     prisma.refundRecord.count({ where: { status: "PENDING" } }),
     prisma.sellerApplication.count({ where: { status: "PENDING" } }),
     prisma.misuseReport.count({ where: { status: "OPEN" } }),
+    prisma.bankTransaction.count({ where: { status: { in: ["UNMATCHED", "MISMATCH"] } } }),
   ]);
   const bankPending = bankOrders + bankSubs;
 
@@ -26,6 +27,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     { href: "/admin/users", label: "Người dùng", icon: Users, badge: 0 },
     { href: "/admin/sellers", label: "Mở kênh bán", icon: Store, badge: pendingSellers },
     { href: "/admin/payments", label: "Chuyển khoản", icon: QrCode, badge: bankPending },
+    { href: "/admin/bank-transactions", label: "Biến động số dư", icon: Landmark, badge: bankTxnPending },
     { href: "/admin/disputes", label: "Tranh chấp", icon: AlertTriangle, badge: openDisputes },
     { href: "/admin/refunds", label: "Hoàn tiền", icon: Undo2, badge: pendingRefunds },
     { href: "/admin/dmca", label: "DMCA", icon: ShieldAlert, badge: dmca },

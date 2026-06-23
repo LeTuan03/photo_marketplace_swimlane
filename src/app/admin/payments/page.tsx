@@ -31,8 +31,8 @@ export default async function AdminPaymentsPage() {
   return (
     <div>
       <PageHeader
-        title="Đối chiếu chuyển khoản"
-        subtitle="So nội dung & số tiền với biến động số dư tài khoản, rồi xác nhận để hoàn tất đơn."
+        title="Đối chiếu chuyển khoản (thủ công)"
+        subtitle="Dự phòng khi tự khớp không nhận diện được. Tiền vào đúng nội dung được tự xác nhận realtime ở mục Biến động số dư."
       />
 
       {empty ? (

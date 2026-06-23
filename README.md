@@ -1,8 +1,9 @@
 # Picseo — Hệ thống mua bán & trao đổi ảnh online
 
 Triển khai thực tế từ sơ đồ luồng `photo_marketplace_swimlane.html`. Một marketplace ảnh bản
-quyền với kiểm duyệt, thanh toán qua **VNPay**, **escrow** giữ tiền, cấp **license + certificate**,
-và link tải có thời hạn.
+quyền với kiểm duyệt, thanh toán qua **chuyển khoản QR ngân hàng (tự cộng tiền realtime)**,
+**escrow** giữ tiền, cấp **license + certificate**, và link tải có thời hạn. (VNPay/MoMo/PayOS
+giữ làm phương án phụ.)
 
 > **Stack:** Next.js 15 (App Router) · TypeScript · PostgreSQL + Prisma · TailwindCSS ·
 > Auth tự quản (JWT/jose) · Sharp (watermark) · S3/MinIO hoặc lưu cục bộ · Nodemailer · VNPay.
@@ -100,7 +101,36 @@ S3_SECRET_ACCESS_KEY="minioadmin"
 
 ---
 
-## 5. Thanh toán VNPay
+## 5. Thanh toán
+
+### Chuyển khoản QR ngân hàng — tự cộng tiền realtime (CỔNG CHÍNH)
+
+Không phí cổng, không qua cổng trung gian giữ tiền, tiền vào tài khoản của bạn rồi tự cộng:
+
+```
+Frontend → tạo đơn → sinh VietQR (nhúng số tiền + nội dung "PIC...") → người mua chuyển khoản
+        → tiền vào tài khoản ngân hàng → nguồn giám sát số dư (SePay/Casso) đẩy webhook
+        → POST /api/payment/sepay → ghi sổ (chống trùng) + khớp đơn qua "PIC..." + đúng số tiền
+        → fulfillPaidOrder → đơn PAID (realtime)
+```
+
+- **Bật tự cộng tiền:** đăng ký một nguồn giám sát biến động số dư (SePay/Casso — gói free, dùng
+  được tài khoản **cá nhân** với một số ngân hàng), trỏ webhook về `<APP_URL>/api/payment/sepay`,
+  đặt `BANK_WEBHOOK_API_KEY` (hoặc `SEPAY_API_KEY`) trùng với key/secure-token khai trên dashboard.
+  Endpoint **provider-agnostic**: nhận được cả payload SePay (`Authorization: Apikey`) lẫn Casso
+  (`secure-token`), và một SMS/notification-forwarder tự host gửi JSON `{id, amount, content}`.
+- **Chống xử lý trùng:** mỗi khoản tiền vào ghi vào sổ `BankTransaction` với `refCode` UNIQUE — webhook
+  retry / chạy song song chỉ fulfill đúng một lần. Idempotent ở cả tầng `confirmGatewayPayment`.
+- **Đối chiếu phần lệch:** tiền vào sai nội dung (không trích được "PIC...") hoặc **lệch số tiền** không
+  tự khớp — admin xử lý tại **`/admin/bank-transactions`** (chọn đúng đơn/gói để khớp, hoặc bỏ qua).
+  Khi cổng báo đã nhận tiền nhưng lệch số tiền, admin được cảnh báo in-app.
+- **Dự phòng thủ công:** vẫn giữ xác nhận tay tại **`/admin/payments`** (đối chiếu số dư rồi bấm xác nhận)
+  cho trường hợp chưa bật webhook.
+
+> Khi **chưa** cấu hình ngân hàng (và không có cổng thật nào khác) ở môi trường dev, hệ thống tự dùng
+> **cổng giả lập** (`/payment/mock`) để chạy thử toàn bộ luồng escrow.
+
+### VNPay (sandbox) — phương án phụ
 
 1. Đăng ký merchant **sandbox** tại https://sandbox.vnpayment.vn → lấy `TmnCode` và `HashSecret`.
 2. Điền vào `.env` (`VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`).

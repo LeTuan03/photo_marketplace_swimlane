@@ -635,3 +635,34 @@ model SellerApplication {
   @@index([status])
   @@index([userId])
 }
+
+// Trạng thái một biến động số dư (tiền VÀO) ghi nhận từ webhook ngân hàng.
+enum BankTxnStatus {
+  MATCHED // đã khớp đúng đơn/gói + tự fulfill
+  UNMATCHED // không trích/khớp được mã PIC nào -> admin đối chiếu thủ công
+  MISMATCH // khớp mã nhưng LỆCH số tiền -> admin xử lý
+  IGNORED // admin đánh dấu giao dịch không liên quan
+}
+
+// Sổ giao dịch chuyển khoản đến (biến động số dư) do nguồn auto-detect đẩy về
+// (SePay/Casso/SMS forwarder). Là nguồn sự thật cho đối soát + chống xử lý TRÙNG:
+// refCode (mã GD của nguồn) UNIQUE nên webhook retry / chạy song song chỉ ghi 1 lần.
+// Mỗi dòng tự khớp đơn/gói qua mã PIC trong nội dung rồi gọi confirmGatewayPayment.
+model BankTransaction {
+  id            String        @id @default(cuid())
+  gateway       String // nguồn: SePay | Casso | SMS | manual
+  refCode       String        @unique // mã GD từ nguồn — khoá chống xử lý trùng
+  amountVnd     Int // số tiền VÀO (đồng)
+  content       String        @default("") // nội dung chuyển khoản thô
+  txnRef        String? // mã PIC... trích từ nội dung (nếu có)
+  accountNumber String? // số TK nhận (nếu nguồn gửi)
+  status        BankTxnStatus @default(UNMATCHED)
+  matchedKind   String? // order | sub (khi đã khớp)
+  matchedId     String? // id đơn/gói đã khớp
+  transactionAt DateTime? // thời điểm GD theo nguồn (nếu có)
+  rawJson       String? // payload thô để đối soát/debug
+  createdAt     DateTime      @default(now())
+
+  @@index([status])
+  @@index([txnRef])
+}

@@ -67,7 +67,9 @@ export const env = {
     accountName: str("BANK_ACCOUNT_NAME"), // tên chủ tài khoản (hiển thị)
     qrImage: str("BANK_QR_IMAGE"), // URL/đường dẫn ảnh QR tĩnh của TK (ưu tiên nếu có)
     qrTemplate: str("BANK_QR_TEMPLATE", "compact2"), // mẫu QR động vietqr.io
-    sepayApiKey: str("SEPAY_API_KEY"), // tuỳ chọn: bật webhook tự xác nhận (SePay/Casso)
+    // Khoá xác thực webhook biến động số dư (tự cộng tiền realtime). BANK_WEBHOOK_API_KEY
+    // là tên mới (provider-agnostic); giữ SEPAY_API_KEY làm alias tương thích ngược.
+    webhookKey: str("BANK_WEBHOOK_API_KEY") || str("SEPAY_API_KEY"),
   },
 
   google: {

@@ -69,7 +69,7 @@ export default async function BankPaymentPage({
       <AutoRefresh seconds={5} />
       <PageHeader
         title="Quét mã để chuyển khoản"
-        subtitle="Sau khi bạn chuyển khoản, đơn sẽ được xác nhận khi shop nhận được tiền (thường trong ít phút)."
+        subtitle="Chuyển khoản đúng nội dung & số tiền — hệ thống TỰ ĐỘNG xác nhận trong vài giây sau khi tiền vào tài khoản."
       />
 
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
@@ -101,27 +101,27 @@ export default async function BankPaymentPage({
           <Row label="Nội dung CK" value={memo} mono highlight />
 
           <Alert kind="info">
-            Vui lòng <strong>ghi đúng nội dung chuyển khoản</strong> <code>{memo}</code> và <strong>đúng số tiền</strong> để
-            shop đối chiếu và xác nhận đơn nhanh nhất.
+            Bắt buộc <strong>ghi đúng nội dung chuyển khoản</strong> <code>{memo}</code> và <strong>đúng số tiền</strong> —
+            hệ thống dựa vào đúng 2 thông tin này để tự khớp và xác nhận đơn của bạn.
           </Alert>
 
           {notified ? (
             <div className="flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
               <CheckCircle2 className="h-4 w-4" />
-              Đã ghi nhận. Đơn sẽ được xác nhận sau khi shop kiểm tra biến động số dư.
+              Đã ghi nhận. Nếu sau ít phút đơn chưa tự xác nhận, shop sẽ đối chiếu thủ công.
             </div>
           ) : (
             <form action={notifyBankTransferAction}>
               <input type="hidden" name={hidden.name} value={hidden.value} />
-              <SubmitButton className="btn-primary w-full" pendingText="Đang gửi...">
-                Tôi đã chuyển khoản
+              <SubmitButton className="btn-outline w-full" pendingText="Đang gửi...">
+                Đã chuyển nhưng chưa thấy xác nhận?
               </SubmitButton>
             </form>
           )}
 
           <div className="flex items-center gap-2 pt-1 text-sm text-gray-500">
             <Loader2 className="h-4 w-4 animate-spin text-brand-500" />
-            Đang chờ xác nhận… trang sẽ tự cập nhật khi đơn được duyệt.
+            Đang chờ tiền vào… trang sẽ tự chuyển sang thành công ngay khi xác nhận.
           </div>
 
           <div className="pt-1">

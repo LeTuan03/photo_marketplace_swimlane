@@ -4,10 +4,12 @@ import { env } from "./env";
 
 /**
  * Thanh toán CHUYỂN KHOẢN bằng mã QR tài khoản ngân hàng.
- * Xác nhận THỦ CÔNG: admin đối chiếu biến động số dư rồi bấm xác nhận ở /admin/payments.
+ * Xác nhận TỰ ĐỘNG REALTIME: nguồn giám sát biến động số dư (SePay/Casso) đẩy webhook về
+ * /api/payment/sepay khi tiền vào; hệ thống tự khớp đơn qua mã PIC (extractTxnRef) + đúng số
+ * tiền rồi fulfill ngay (xem src/lib/bank-ingest.ts). Phần không tự khớp -> admin đối chiếu ở
+ * /admin/bank-transactions; xác nhận THỦ CÔNG ở /admin/payments giữ làm dự phòng.
  * QR có 2 cách: (1) ảnh QR tĩnh của tài khoản (BANK_QR_IMAGE) — đúng nghĩa "ảnh QR TK";
  * (2) VietQR động (vietqr.io) tự điền sẵn số tiền + nội dung khi chưa có ảnh tĩnh.
- * (verifyWebhookAuth/extractTxnRef giữ lại để hỗ trợ tự xác nhận qua SePay nếu sau này bật.)
  */
 
 export function isConfigured(): boolean {
@@ -56,16 +58,18 @@ export function extractTxnRef(content: string): string | null {
 }
 
 /**
- * (Tuỳ chọn) Xác thực webhook tự xác nhận qua header `Authorization: Apikey <key>`.
- * FAIL-CLOSED: nếu CHƯA cấu hình SEPAY_API_KEY thì TỪ CHỐI mọi request — webhook
- * không có key là webhook không xác thực, cho phép kẻ tấn công gửi "đã nhận tiền"
- * giả (khớp memo + số tiền vốn hiển thị cho chính người mua) để fulfill miễn phí.
+ * Xác thực webhook biến động số dư (tự cộng tiền realtime). Chấp nhận key qua:
+ *  - `Authorization: Apikey <key>`  (SePay)
+ *  - `secure-token: <key>`          (Casso)
+ * FAIL-CLOSED: nếu CHƯA cấu hình key thì TỪ CHỐI mọi request — webhook không có key là
+ * webhook không xác thực, cho phép kẻ tấn công gửi "đã nhận tiền" giả (khớp memo + số tiền
+ * vốn hiển thị cho chính người mua) để fulfill miễn phí.
  */
-export function verifyWebhookAuth(authHeader: string | null): boolean {
-  const expected = env.bank.sepayApiKey;
+export function verifyWebhookAuth(args: { authHeader: string | null; secureToken: string | null }): boolean {
+  const expected = env.bank.webhookKey;
   if (!expected) return false; // chưa đặt key -> từ chối (bật webhook phải có key)
-  if (!authHeader) return false;
-  const token = authHeader.replace(/^Apikey\s+/i, "").trim();
+  const token = (args.secureToken?.trim() || args.authHeader?.replace(/^Apikey\s+/i, "").trim() || "");
+  if (!token) return false;
   const a = Buffer.from(token);
   const b = Buffer.from(expected);
   return a.length === b.length && crypto.timingSafeEqual(a, b);

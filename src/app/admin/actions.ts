@@ -325,6 +325,60 @@ export async function confirmBankPaymentAction(formData: FormData) {
   redirect("/admin/payments");
 }
 
+/**
+ * Đối chiếu thủ công một biến động số dư (BankTransaction) còn TREO (không tự khớp được
+ * mã PIC hoặc LỆCH số tiền) với một đơn/gói BANKQR đang chờ: fulfill/kích hoạt rồi đánh
+ * dấu giao dịch ĐÃ KHỚP. Giành nguyên tử (UNMATCHED/MISMATCH -> MATCHED) chống double-submit.
+ */
+export async function matchBankTransactionAction(formData: FormData) {
+  const admin = await requireRole("ADMIN");
+  const txnId = String(formData.get("txnId") ?? "");
+  const target = String(formData.get("target") ?? ""); // "order:<id>" | "sub:<id>"
+  const [kind, refId] = target.split(":");
+  if (!txnId || (kind !== "order" && kind !== "sub") || !refId) {
+    redirectError("/admin/bank-transactions?error=Thiếu thông tin đối chiếu");
+  }
+
+  const txn = await prisma.bankTransaction.findUnique({ where: { id: txnId } });
+  if (!txn || (txn.status !== "UNMATCHED" && txn.status !== "MISMATCH")) {
+    redirect("/admin/bank-transactions");
+  }
+
+  // Chỉ khớp đơn/gói BANKQR đang PENDING (không kích hoạt khống đơn cổng khác).
+  const providerTxnId = `BANK-MATCH-${admin.id.slice(-6)}`;
+  if (kind === "sub") {
+    const sub = await prisma.subscription.findFirst({ where: { id: refId, status: "PENDING", paymentProvider: "BANKQR" } });
+    if (!sub) redirectError("/admin/bank-transactions?error=Không tìm thấy gói BANKQR đang chờ");
+    await activateSubscription(sub!.id, providerTxnId);
+  } else {
+    const order = await prisma.order.findFirst({ where: { id: refId, status: "PENDING", paymentProvider: "BANKQR" } });
+    if (!order) redirectError("/admin/bank-transactions?error=Không tìm thấy đơn BANKQR đang chờ");
+    await fulfillPaidOrder(order!.id, providerTxnId);
+  }
+
+  // Giành nguyên tử để không ghi đè trạng thái nếu webhook vừa tự khớp xong song song.
+  await prisma.bankTransaction.updateMany({
+    where: { id: txnId, status: { in: ["UNMATCHED", "MISMATCH"] } },
+    data: { status: "MATCHED", matchedKind: kind, matchedId: refId },
+  });
+  revalidatePath("/admin/bank-transactions");
+  redirect("/admin/bank-transactions");
+}
+
+/** Đánh dấu một biến động số dư là KHÔNG LIÊN QUAN (tiền vào không thuộc đơn nào). */
+export async function ignoreBankTransactionAction(formData: FormData) {
+  await requireRole("ADMIN");
+  const txnId = String(formData.get("txnId") ?? "");
+  if (txnId) {
+    await prisma.bankTransaction.updateMany({
+      where: { id: txnId, status: { in: ["UNMATCHED", "MISMATCH"] } },
+      data: { status: "IGNORED" },
+    });
+  }
+  revalidatePath("/admin/bank-transactions");
+  redirect("/admin/bank-transactions");
+}
+
 /** Hủy đơn/gói đang chờ chuyển khoản (không nhận được tiền hoặc quá hạn). */
 export async function rejectBankPaymentAction(formData: FormData) {
   await requireRole("ADMIN");
